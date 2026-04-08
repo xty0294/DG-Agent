@@ -8,7 +8,7 @@
 
 - 🌐 **纯网页运行** — 无需安装任何 APP，打开浏览器即用
 - 🦷 **BLE 直连** — Web Bluetooth 直接连接郊狼 3.0，无需配对
-- 🤖 **多 AI 支持** — DeepSeek / 通义千问 / Gemini / OpenAI，一键切换
+- 🤖 **多 AI 支持** — DeepSeek / 通义千问 / OpenAI / Gemini，一键切换
 - 🎭 **6 种场景模式** — 温柔调情、主导调教、欲擒故纵、奖惩游戏、边缘控制、温情陪伴
 - ✏️ **自定义人设** — 自由编写 AI 人设提示词，支持保存多套方案
 - 🎛️ **7 个工具** — AI 自动调用：强度控制、波形播放、自定义波形设计、状态查询
@@ -27,8 +27,8 @@
 |--------|---------|-------------|
 | 🔥 **DeepSeek** (推荐) | ✅ | [platform.deepseek.com](https://platform.deepseek.com) |
 | 🟣 **通义千问** | ✅ | [bailian.console.aliyun.com](https://bailian.console.aliyun.com) |
-| 🔵 **Gemini** | ❌ 需代理 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | ⚫ **OpenAI** | ❌ 需代理 | [platform.openai.com](https://platform.openai.com) |
+| 🔵 **Gemini** | ❌ 需代理 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 
 > 💡 国内用户推荐 **DeepSeek**，注册即送免费额度，无需代理。
 
@@ -75,56 +75,6 @@ AI：已经开始了哦，是很轻柔的呼吸波形，感觉怎么样？
 | 🎨 `design_wave` | 设计多步变化波形 | `design_wave("A", steps=[...])` |
 | ⏹️ `stop_wave` | 停止波形输出 | `stop_wave("A")` |
 | 📊 `get_status` | 查询设备状态 | `get_status()` |
-
-## 🌊 预设波形
-
-| 名称 | 说明 | 体感 |
-|------|------|------|
-| 🫁 `breath` | 呼吸 | 缓慢起伏，从无到强再回落 |
-| 🌊 `tide` | 潮汐 | 频率渐变，波浪感 |
-| 💤 `pulse_low` | 低脉冲 | 轻柔持续 |
-| ⚡ `pulse_mid` | 中脉冲 | 中等持续 |
-| 🔥 `pulse_high` | 高脉冲 | 强烈持续 |
-| 👆 `tap` | 敲击 | 有节奏的间歇脉冲 |
-
-## 🏗️ 项目结构
-
-```
-DG-Agent/
-├── 📄 index.html              # 入口页面
-├── 📄 vite.config.ts           # Vite 构建配置
-├── 📄 tsconfig.json            # TypeScript 配置
-├── 📦 src/
-│   ├── 🤖 app.ts              # 主入口：UI 交互、设置、历史记录
-│   ├── 📡 bluetooth.ts         # Web Bluetooth BLE 协议实现
-│   ├── 🧠 ai-service.ts        # AI 服务：Gemini / OpenAI 兼容 / DeepSeek / Qwen
-│   ├── 🎛️ tools.ts             # 工具定义 + 场景预设 + 系统提示词
-│   ├── 💬 chat.ts              # 聊天 UI：消息渲染、Markdown、流式输出
-│   ├── 📜 history.ts           # 聊天历史持久化 (localStorage)
-│   ├── 🎨 style.css            # 完整样式：设计系统 + 响应式布局
-│   └── 📝 types.ts             # TypeScript 类型定义
-└── 📦 .github/workflows/
-    └── 🚀 deploy.yml           # GitHub Pages 自动部署
-```
-
-## 🔧 本地开发
-
-```bash
-# 克隆项目
-git clone https://github.com/0xNullAI/DG-Agent.git
-cd DG-Agent
-
-# 安装依赖
-npm install
-
-# 启动开发服务器
-npm run dev
-
-# 构建生产版本
-npm run build
-```
-
-> 💡 本地开发需要 HTTPS 才能使用 Web Bluetooth。Vite 默认使用 HTTP，可通过 `--https` 参数或使用 Chrome 的 `chrome://flags/#unsafely-treat-insecure-origin-as-secure` 添加 `http://localhost:5173` 白名单。
 
 ## 🖥️ 浏览器支持
 
