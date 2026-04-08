@@ -23,19 +23,8 @@ let openDropdown: string | null = null; // which dropdown is open
 // -- Providers --
 const PROVIDERS: ProviderDef[] = [
   {
-    id: 'gemini',
-    name: 'Gemini',
-    hint: '免费 API Key → aistudio.google.com/apikey（国内需代理）',
-    fields: [
-      { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'AIza...' },
-      { key: 'model', label: '模型', type: 'text', placeholder: 'gemini-2.5-flash' },
-      { key: 'baseUrl', label: 'Base URL（可选，用于代理）', type: 'url', placeholder: 'https://generativelanguage.googleapis.com' },
-    ],
-  },
-  {
     id: 'deepseek',
     name: 'DeepSeek',
-    hint: '国内直连，注册即送额度 → platform.deepseek.com',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'deepseek-chat' },
@@ -44,7 +33,6 @@ const PROVIDERS: ProviderDef[] = [
   {
     id: 'qwen',
     name: '通义千问',
-    hint: '阿里云百万免费 Token → bailian.console.aliyun.com',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'qwen-plus' },
@@ -53,11 +41,19 @@ const PROVIDERS: ProviderDef[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    hint: '支持 OpenAI / Groq / OpenRouter 等兼容服务',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },
       { key: 'model', label: '模型', type: 'text', placeholder: 'gpt-4o-mini' },
       { key: 'baseUrl', label: 'Base URL', type: 'url', placeholder: 'https://api.openai.com/v1' },
+    ],
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    fields: [
+      { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'AIza...' },
+      { key: 'model', label: '模型', type: 'text', placeholder: 'gemini-2.5-flash' },
+      { key: 'baseUrl', label: 'Base URL', type: 'url', placeholder: 'https://generativelanguage.googleapis.com' },
     ],
   },
 ];
@@ -374,7 +370,7 @@ function renderSettingsTabs(): void {
   PROVIDERS.forEach((p) => {
     const tab = document.createElement('button');
     tab.className = 'provider-tab' + (p.id === saved.provider ? ' active' : '');
-    tab.textContent = p.id === 'openai' ? 'OpenAI' : p.id === 'gemini' ? 'Gemini' : 'Claude';
+    tab.textContent = p.name;
     tab.addEventListener('click', () => {
       selectProvider(p.id);
     });
