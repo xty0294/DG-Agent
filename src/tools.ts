@@ -38,16 +38,12 @@ export type TimerFireCallback = (info: TimerFireInfo) => void | Promise<void>;
 let nextTimerId = 1;
 const timers: Map<number, TimerEntry> = new Map();
 let onTimerFire: TimerFireCallback | null = null;
-let isTimerTriggeredTurn = false;
 
 /** Register a callback invoked every time a timer fires. */
 export function registerTimerCallback(cb: TimerFireCallback): void {
   onTimerFire = cb;
 }
 
-export function setTimerTriggeredTurn(value: boolean): void {
-  isTimerTriggeredTurn = value;
-}
 
 export function clearAllTimers(): void {
   for (const entry of timers.values()) {
@@ -72,8 +68,7 @@ export const DEVICE_SUFFIX = `
 - 可用波形预设：breath(呼吸/渐强渐弱)、tide(潮汐/波浪起伏)、pulse_low(低脉冲/轻柔)、pulse_mid(中脉冲/适中)、pulse_high(高脉冲/强烈)、tap(轻拍/节奏感)
 - 可通过 design_wave 自定义任意波形组合，每步可设频率(10-1000ms)、强度(0-100)、重复次数
 - 操作流程：设置强度(set_strength) → 发送波形(send_wave)
-- 定时器功能：可用 set_timer 延迟或循环执行工具操作。支持一次性（"10秒后停止波形"）和重复（"每3秒增加强度5，共5次"，设 interval_seconds+repeat_count）。每次定时器触发后系统会自动通知你执行结果。用 cancel_timer 取消，list_timers 查看
-- 定时器限制：禁止在定时器回调中创建新的定时器（会被系统拒绝）；同时最多10个活跃定时器
+- 定时器功能：可用 set_timer 延迟或循环执行工具操作。支持一次性（"10秒后停止波形"）和重复（"每3秒增加强度5，共5次"，设 interval_seconds+repeat_count）。每次定时器触发后系统会自动通知你执行结果。用 cancel_timer 取消，list_timers 查看。同时最多10个活跃定时器
 - 安全限制：设备强度会被自动限制在用户设定的安全上限内，无法超过
 - 重要：只在用户明确要求操作设备时才调用工具。普通聊天、问候、闲聊绝对不要调用任何工具
 - 绝对不要连续多次调用同一个工具。get_status 最多调用一次，拿到结果后必须直接用文字回复用户
@@ -421,9 +416,6 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       }
 
       case 'set_timer': {
-        if (isTimerTriggeredTurn) {
-          return JSON.stringify({ error: '禁止在定时器触发的回复中创建新定时器，这会导致无限循环。' });
-        }
         if (timers.size >= 10) {
           return JSON.stringify({ error: '活跃定时器数量已达上限(10个)，请先取消部分定时器。' });
         }

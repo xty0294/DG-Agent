@@ -915,8 +915,6 @@ async function sendTimerNotificationToLLM(notifications: TimerNotification[]): P
   chat.showTyping();
   currentAssistantMsgId = null;
 
-  // Set timer-triggered flag so LLM cannot create new timers in this turn
-  if (toolsMod?.setTimerTriggeredTurn) toolsMod.setTimerTriggeredTurn(true);
 
   // Timeout race for LLM call
   const LLM_TIMEOUT = 30_000;
@@ -986,7 +984,6 @@ async function sendTimerNotificationToLLM(notifications: TimerNotification[]): P
     }
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
-    if (toolsMod?.setTimerTriggeredTurn) toolsMod.setTimerTriggeredTurn(false);
     isProcessing = false;
     chat.setInputEnabled(true);
 
