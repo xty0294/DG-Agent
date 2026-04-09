@@ -8,7 +8,7 @@
 
 - 🌐 **纯网页运行** — 无需安装任何 APP，打开浏览器即用
 - 🦷 **BLE 直连** — Web Bluetooth 直接连接郊狼 3.0，无需配对
-- 🤖 **多 AI 支持** — DeepSeek / 通义千问 / OpenAI / Gemini，一键切换
+- 🤖 **多 AI 支持** — 免费体验 / 通义千问 / OpenAI / 自定义，一键切换
 - 🎭 **6 种场景模式** — 温柔调情、主导调教、欲擒故纵、奖惩游戏、边缘控制、温情陪伴
 - ✏️ **自定义人设** — 自由编写 AI 人设提示词，支持保存多套方案
 - 🎛️ **7 个工具** — AI 自动调用：强度控制、波形播放、自定义波形设计、状态查询
@@ -23,14 +23,14 @@
 
 点击顶栏 ⚙️ 按钮，选择一个 AI 服务商并填入 API Key：
 
-| 服务商 | 国内直连 | 获取 API Key |
-|--------|---------|-------------|
-| 🔥 **DeepSeek** (推荐) | ✅ | [platform.deepseek.com](https://platform.deepseek.com) |
+| 服务商 | 国内直连 | 说明 |
+|--------|---------|------|
+| 🆓 **免费体验** (推荐) | ✅ | 无需 API Key，每分钟限 10 条 |
 | 🟣 **通义千问** | ✅ | [bailian.console.aliyun.com](https://bailian.console.aliyun.com) |
 | ⚫ **OpenAI** | ❌ 需代理 | [platform.openai.com](https://platform.openai.com) |
-| 🔵 **Gemini** | ❌ 需代理 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| 🔧 **自定义** | — | 自定义模型、API Key 和接口地址，兼容 OpenAI API 格式 |
 
-> 💡 国内用户推荐 **DeepSeek**，注册即送免费额度，无需代理。
+> 💡 新用户推荐 **免费体验**，零配置即可开始使用。
 
 ### 2️⃣ 连接设备
 
