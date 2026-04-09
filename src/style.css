@@ -534,6 +534,20 @@ html, body {
 
 .tool-notification.expanded .tool-details { display: block; }
 
+/* ---------- System message (timer notifications) ---------- */
+.message.system {
+  align-self: center;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  color: var(--text-2);
+  font-size: 0.9em;
+  padding: 8px 14px;
+  margin: 4px 16px;
+  border-radius: 8px;
+  max-width: 85%;
+  opacity: 0.9;
+}
+
 /* ---------- Typing indicator ---------- */
 .typing-indicator {
   align-self: flex-start;
@@ -559,6 +573,92 @@ html, body {
 @keyframes bounce-dot {
   0%, 60%, 100% { transform: translateY(0); }
   30% { transform: translateY(-6px); }
+}
+
+/* ---------- Emergency stop button ---------- */
+.emergency-stop-btn {
+  background: #ef4444 !important;
+  color: white !important;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: background 0.2s;
+}
+.emergency-stop-btn:hover {
+  background: #dc2626 !important;
+}
+
+/* ---------- Active timers panel ---------- */
+.active-timers-panel {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  font-size: 0.85em;
+}
+.active-timers-panel.hidden { display: none; }
+
+.timers-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.cancel-all-btn {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.cancel-all-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.timers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--bg);
+  border-radius: 6px;
+}
+
+.timer-label {
+  flex: 1;
+  color: var(--text);
+}
+
+.timer-progress {
+  color: var(--accent);
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+.timer-cancel-btn {
+  background: transparent;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 1em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.timer-cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
 }
 
 /* ============================================================

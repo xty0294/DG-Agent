@@ -434,6 +434,7 @@ export async function disconnect(): Promise<void> {
  * @param value  0-200
  */
 export function setStrength(channel: string, value: number): void {
+  if (!writeChar) throw new Error('设备未连接');
   const ch = channel.toUpperCase() as Channel;
   const v = clamp(Math.round(value), 0, 200);
   if (ch === 'A') {
@@ -453,6 +454,7 @@ export function setStrength(channel: string, value: number): void {
  * @param delta  positive = increase, negative = decrease
  */
 export function addStrength(channel: string, delta: number): void {
+  if (!writeChar) throw new Error('设备未连接');
   const ch = channel.toUpperCase() as Channel;
   const d = Math.round(delta);
   if (d === 0) return;
@@ -475,6 +477,7 @@ export function addStrength(channel: string, delta: number): void {
  * @param limitB  0-200
  */
 export function setStrengthLimit(limitA: number, limitB: number): void {
+  if (!writeChar) throw new Error('设备未连接');
   state.limitA = clamp(Math.round(limitA), 0, 200);
   state.limitB = clamp(Math.round(limitB), 0, 200);
   writeBF(state.limitA, state.limitB).catch((err: unknown) => {
@@ -500,6 +503,7 @@ export function sendWave(
   durationFrames: number = 10,
   loop: boolean = false,
 ): void {
+  if (!writeChar) throw new Error('设备未连接');
   const ch = channel.toUpperCase() as Channel;
   let frames: WaveFrame[];
 
@@ -540,6 +544,7 @@ export function sendWave(
  * @param loop  Whether to loop
  */
 export function designWave(channel: string, steps: WaveStep[], loop: boolean = false): void {
+  if (!writeChar) throw new Error('设备未连接');
   const ch = channel.toUpperCase() as Channel;
   const frames: WaveFrame[] = [];
   for (const step of steps) {
@@ -568,6 +573,7 @@ export function designWave(channel: string, steps: WaveStep[], loop: boolean = f
  * @param channel  'A', 'B', or null/undefined for both
  */
 export function stopWave(channel?: string | null): void {
+  if (!writeChar) throw new Error('设备未连接');
   const channels: Channel[] = channel ? [channel.toUpperCase() as Channel] : ['A', 'B'];
   for (const ch of channels) {
     waveState[ch].active = false;
@@ -593,4 +599,8 @@ export function getStatus(): DeviceState {
     waveActiveA: waveState.A.active,
     waveActiveB: waveState.B.active,
   };
+}
+
+export function getStrengthLimits(): { limitA: number; limitB: number } {
+  return { limitA: state.limitA, limitB: state.limitB };
 }

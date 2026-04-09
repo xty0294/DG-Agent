@@ -11,15 +11,51 @@ import * as bt from './bluetooth';
 interface TimerEntry {
   id: number;
   label: string;
-  timeoutHandle: ReturnType<typeof setTimeout>;
+  handle: ReturnType<typeof setTimeout>;
   action: string;
   args: Record<string, any>;
   createdAt: number;
   delayMs: number;
+  intervalMs: number;
+  repeatTotal: number;
+  repeatDone: number;
 }
+
+/** Info passed to the app layer after every timer tick. */
+export interface TimerFireInfo {
+  timerId: number;
+  label: string;
+  action: string;
+  actionArgs: Record<string, any>;
+  result: string;
+  repeatDone: number;
+  repeatTotal: number;
+  finished: boolean;
+}
+
+export type TimerFireCallback = (info: TimerFireInfo) => void | Promise<void>;
 
 let nextTimerId = 1;
 const timers: Map<number, TimerEntry> = new Map();
+let onTimerFire: TimerFireCallback | null = null;
+let isTimerTriggeredTurn = false;
+
+/** Register a callback invoked every time a timer fires. */
+export function registerTimerCallback(cb: TimerFireCallback): void {
+  onTimerFire = cb;
+}
+
+export function setTimerTriggeredTurn(value: boolean): void {
+  isTimerTriggeredTurn = value;
+}
+
+export function clearAllTimers(): void {
+  for (const entry of timers.values()) {
+    clearTimeout(entry.handle);
+  }
+  timers.clear();
+  nextTimerId = 1;
+}
 
 /**
  * 设备能力说明 — 作为系统后缀追加到所有 prompt 后面。
@@ -36,7 +72,9 @@ export const DEVICE_SUFFIX = `
 - 可用波形预设：breath(呼吸/渐强渐弱)、tide(潮汐/波浪起伏)、pulse_low(低脉冲/轻柔)、pulse_mid(中脉冲/适中)、pulse_high(高脉冲/强烈)、tap(轻拍/节奏感)
 - 可通过 design_wave 自定义任意波形组合，每步可设频率(10-1000ms)、强度(0-100)、重复次数
 - 操作流程：设置强度(set_strength) → 发送波形(send_wave)
-- 定时器功能：可用 set_timer 延迟执行任意工具操作（如"10秒后停止波形"、"5秒后切换到高脉冲"），用 cancel_timer 取消，用 list_timers 查看
+- 定时器功能：可用 set_timer 延迟或循环执行工具操作。支持一次性（"10秒后停止波形"）和重复（"每3秒增加强度5，共5次"，设 interval_seconds+repeat_count）。每次定时器触发后系统会自动通知你执行结果。用 cancel_timer 取消，list_timers 查看
+- 定时器限制：禁止在定时器回调中创建新的定时器（会被系统拒绝）；同时最多10个活跃定时器
+- 安全限制：设备强度会被自动限制在用户设定的安全上限内，无法超过
 - 重要：只在用户明确要求操作设备时才调用工具。普通聊天、问候、闲聊绝对不要调用任何工具
 - 绝对不要连续多次调用同一个工具。get_status 最多调用一次，拿到结果后必须直接用文字回复用户
 - 每次回复中工具调用总数不应超过3次
@@ -177,7 +215,7 @@ export const tools: ToolDef[] = [
       type: 'object' as const,
       properties: {
         channel: { type: 'string', enum: ['A', 'B'], description: '通道' },
-        delta: { type: 'integer', description: '变化量，正数增加，负数减少' },
+        delta: { type: 'integer', description: '变化量，正数增加，负数减少。最终值会被限制在安全上限内' },
       },
       required: ['channel', 'delta'],
     },
@@ -196,7 +234,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: 'send_wave',
-    description: '发送波形到指定通道。可使用预设(breath/tide/pulse_low/pulse_mid/pulse_high/tap)或自定义频率+强度',
+    description: '发送波形到指定通道。使用 preset(预设名) 或 frequency+intensity(自定义)，二者互斥',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -229,7 +267,7 @@ export const tools: ToolDef[] = [
             properties: {
               freq: { type: 'integer' },
               intensity: { type: 'integer' },
-              repeat: { type: 'integer' },
+              repeat: { type: 'integer', description: '该步骤的重复次数，默认1' },
             },
             required: ['freq', 'intensity'],
           },
@@ -256,18 +294,31 @@ export const tools: ToolDef[] = [
   },
   {
     name: 'set_timer',
-    description: '设置定时器，延迟指定秒数后自动执行一个工具操作。可用于延迟切换波形、调整强度、停止输出等',
+    description:
+      '设置定时器。支持一次性延迟执行，也支持重复执行（如"每3秒增加强度5，共执行5次"）。每次触发后系统会自动通知你执行结果。',
     parameters: {
       type: 'object' as const,
       properties: {
-        delay_seconds: { type: 'number', minimum: 1, maximum: 3600, description: '延迟秒数(1-3600)' },
+        delay_seconds: { type: 'number', minimum: 1, maximum: 3600, description: '首次触发的延迟秒数(1-3600)' },
         action: {
           type: 'string',
           enum: ['set_strength', 'add_strength', 'send_wave', 'design_wave', 'stop_wave'],
-          description: '到时要执行的工具名',
+          description: '要执行的工具名',
         },
         action_args: { type: 'object', description: '传给目标工具的参数' },
-        label: { type: 'string', description: '定时器备注（可选），如"切换到高脉冲"' },
+        interval_seconds: {
+          type: 'number',
+          minimum: 1,
+          maximum: 3600,
+          description: '重复间隔秒数（不填则只执行一次）',
+        },
+        repeat_count: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          description: '总共执行次数（不填则只执行一次，配合 interval_seconds 使用）',
+        },
+        label: { type: 'string', description: '定时器备注（可选），如"每3秒增加5"' },
       },
       required: ['delay_seconds', 'action', 'action_args'],
     },
@@ -300,14 +351,26 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     switch (name) {
       case 'set_strength': {
         const { channel, value } = args as { channel: string; value: number };
-        bt.setStrength(channel, value);
-        return JSON.stringify({ success: true, channel, value });
+        const limits = bt.getStrengthLimits();
+        const limit = channel.toUpperCase() === 'A' ? limits.limitA : limits.limitB;
+        const safeValue = Math.min(Math.max(0, value), limit);
+        bt.setStrength(channel, safeValue);
+        return JSON.stringify({ success: true, channel, value: safeValue, limited: safeValue < value });
       }
 
       case 'add_strength': {
         const { channel, delta } = args as { channel: string; delta: number };
-        bt.addStrength(channel, delta);
-        return JSON.stringify({ success: true, channel, delta });
+        const status = bt.getStatus();
+        const limits = bt.getStrengthLimits();
+        const current = channel.toUpperCase() === 'A' ? status.strengthA : status.strengthB;
+        const limit = channel.toUpperCase() === 'A' ? limits.limitA : limits.limitB;
+        const desired = current + delta;
+        const clamped = Math.min(Math.max(0, desired), limit);
+        const safeDelta = clamped - current;
+        if (safeDelta !== 0) {
+          bt.addStrength(channel, safeDelta);
+        }
+        return JSON.stringify({ success: true, channel, delta: safeDelta, resultStrength: clamped, limited: safeDelta !== delta });
       }
 
       case 'set_strength_limit': {
@@ -358,41 +421,94 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       }
 
       case 'set_timer': {
-        const { delay_seconds, action, action_args, label } = args as {
+        if (isTimerTriggeredTurn) {
+          return JSON.stringify({ error: '禁止在定时器触发的回复中创建新定时器，这会导致无限循环。' });
+        }
+        if (timers.size >= 10) {
+          return JSON.stringify({ error: '活跃定时器数量已达上限(10个)，请先取消部分定时器。' });
+        }
+        const { delay_seconds, action, action_args, interval_seconds, repeat_count, label } = args as {
           delay_seconds: number;
           action: string;
           action_args: Record<string, any>;
+          interval_seconds?: number;
+          repeat_count?: number;
           label?: string;
         };
         const id = nextTimerId++;
         const delayMs = delay_seconds * 1000;
-        const handle = setTimeout(async () => {
-          timers.delete(id);
-          try {
-            await executeTool(action, action_args);
-            console.log(`[timer] #${id} executed: ${action}`, action_args);
-          } catch (e) {
-            console.error(`[timer] #${id} failed:`, e);
-          }
-        }, delayMs);
+        const intervalMs = (interval_seconds ?? 0) * 1000;
+        const totalCount = repeat_count ?? 1;
+
         const entry: TimerEntry = {
           id,
           label: label || action,
-          timeoutHandle: handle,
+          handle: 0 as any,
           action,
           args: action_args,
           createdAt: Date.now(),
           delayMs,
+          intervalMs,
+          repeatTotal: totalCount,
+          repeatDone: 0,
         };
+
+        const tick = async () => {
+          if (!timers.has(id)) return;
+          entry.repeatDone++;
+          let result: string;
+          try {
+            result = await executeTool(action, action_args);
+            console.log(`[timer] #${id} tick ${entry.repeatDone}/${entry.repeatTotal}: ${action}`, action_args);
+          } catch (e) {
+            result = JSON.stringify({ error: e instanceof Error ? e.message : String(e) });
+            console.error(`[timer] #${id} failed:`, e);
+          }
+
+          const finished = entry.repeatDone >= entry.repeatTotal;
+          if (finished) {
+            timers.delete(id);
+          }
+
+          if (onTimerFire) {
+            try {
+              await onTimerFire({
+                timerId: id,
+                label: entry.label,
+                action,
+                actionArgs: action_args,
+                result,
+                repeatDone: entry.repeatDone,
+                repeatTotal: entry.repeatTotal,
+                finished,
+              });
+            } catch (e) {
+              console.error(`[timer] #${id} onTimerFire error:`, e);
+            }
+          }
+
+          if (!finished && intervalMs > 0 && timers.has(id)) {
+            entry.handle = setTimeout(tick, intervalMs);
+          }
+        };
+
+        entry.handle = setTimeout(tick, delayMs);
         timers.set(id, entry);
+
+        const desc = totalCount > 1
+          ? `定时器 #${id} 已设置，${delay_seconds}秒后首次执行，之后每${interval_seconds}秒重复，共${totalCount}次`
+          : `定时器 #${id} 已设置，${delay_seconds}秒后执行 ${action}`;
+
         return JSON.stringify({
           success: true,
           timer_id: id,
           delay_seconds,
+          interval_seconds: interval_seconds ?? null,
+          repeat_count: totalCount,
           action,
           action_args,
           label: entry.label,
-          message: `定时器 #${id} 已设置，${delay_seconds}秒后执行 ${action}`,
+          message: desc,
         });
       }
 
@@ -402,19 +518,23 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         if (!entry) {
           return JSON.stringify({ success: false, error: `定时器 #${timer_id} 不存在或已执行` });
         }
-        clearTimeout(entry.timeoutHandle);
+        clearTimeout(entry.handle);
         timers.delete(timer_id);
-        return JSON.stringify({ success: true, message: `定时器 #${timer_id} (${entry.label}) 已取消` });
+        return JSON.stringify({
+          success: true,
+          message: `定时器 #${timer_id} (${entry.label}) 已取消，已执行 ${entry.repeatDone}/${entry.repeatTotal} 次`,
+        });
       }
 
       case 'list_timers': {
-        const now = Date.now();
         const list = Array.from(timers.values()).map((t) => ({
           timer_id: t.id,
           label: t.label,
           action: t.action,
           action_args: t.args,
-          remaining_seconds: Math.max(0, Math.round((t.createdAt + t.delayMs - now) / 1000)),
+          repeat_done: t.repeatDone,
+          repeat_total: t.repeatTotal,
+          interval_seconds: t.intervalMs > 0 ? t.intervalMs / 1000 : null,
         }));
         return JSON.stringify({ success: true, count: list.length, timers: list });
       }

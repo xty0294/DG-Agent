@@ -146,6 +146,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     showWelcomeMessage();
   }
+
+  // Register timer callback
+  if (toolsMod?.registerTimerCallback) {
+    toolsMod.registerTimerCallback(handleTimerFire);
+  }
+
+  // Safety: clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+    try { bt?.stopWave?.(null); } catch (_) { /* */ }
+  });
+
+  // Emergency stop button
+  $('btn-emergency-stop')?.addEventListener('click', async () => {
+    if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+    try { await toolsMod?.executeTool('stop_wave', {}); } catch (_) { /* */ }
+    try { await toolsMod?.executeTool('set_strength', { channel: 'A', value: 0 }); } catch (_) { /* */ }
+    try { await toolsMod?.executeTool('set_strength', { channel: 'B', value: 0 }); } catch (_) { /* */ }
+    chat.addSystemMessage('⚡ 紧急停止：已停止所有波形、清除所有定时器、强度归零');
+    refreshTimerPanel();
+  });
+
+  // Cancel all timers button
+  $('btn-cancel-all-timers')?.addEventListener('click', () => {
+    if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+    chat.addSystemMessage('已取消所有定时器');
+    refreshTimerPanel();
+  });
+
+  // Delegate click for individual timer cancel buttons
+  $('timers-list')?.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest('.timer-cancel-btn') as HTMLElement | null;
+    if (!btn) return;
+    const timerId = btn.dataset.timerId;
+    if (timerId && toolsMod?.executeTool) {
+      await toolsMod.executeTool('cancel_timer', { timer_id: parseInt(timerId) });
+      refreshTimerPanel();
+    }
+  });
 });
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
@@ -528,6 +567,8 @@ function renderHistoryList(): void {
 }
 
 function loadConversation(conv: ConversationRecord): void {
+  if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+  refreshTimerPanel();
   conversationHistory.length = 0;
   currentAssistantMsgId = null;
   currentConversation = conv;
@@ -548,6 +589,8 @@ function loadConversation(conv: ConversationRecord): void {
 }
 
 function startNewConversation(): void {
+  if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+  refreshTimerPanel();
   conversationHistory.length = 0;
   currentAssistantMsgId = null;
   currentConversation = null;
@@ -750,6 +793,205 @@ async function handleSendMessage(text: string): Promise<void> {
       history.saveConversation(currentConversation);
       renderHistoryList();
     }
+
+    pruneConversationHistory();
+    drainPendingTimerNotifications();
+  }
+}
+
+// ============================================================
+// TIMER HELPERS
+// ============================================================
+
+async function refreshTimerPanel(): Promise<void> {
+  if (!toolsMod?.executeTool) return;
+  try {
+    const result = JSON.parse(await toolsMod.executeTool('list_timers', {}));
+    chat.updateTimerPanel(result.timers || []);
+  } catch (_) {
+    chat.updateTimerPanel([]);
+  }
+}
+
+const MAX_HISTORY_MESSAGES = 80;
+function pruneConversationHistory(): void {
+  if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+    const excess = conversationHistory.length - MAX_HISTORY_MESSAGES;
+    conversationHistory.splice(0, excess);
+  }
+}
+
+// ============================================================
+// TIMER FIRE HANDLER — notifies chat UI and triggers LLM
+// ============================================================
+
+interface TimerNotification {
+  timerId: number;
+  label: string;
+  action: string;
+  actionArgs: Record<string, any>;
+  result: string;
+  repeatDone: number;
+  repeatTotal: number;
+  finished: boolean;
+}
+
+const MAX_PENDING_NOTIFICATIONS = 20;
+const pendingTimerNotifications: TimerNotification[] = [];
+
+function compactResult(resultJson: string): string {
+  try {
+    const r = JSON.parse(resultJson);
+    if (r.error) return `失败: ${r.error}`;
+    return '成功';
+  } catch { return resultJson.slice(0, 40); }
+}
+
+function formatTimerMessage(info: TimerNotification): string {
+  const progress = info.repeatTotal > 1
+    ? `(${info.repeatDone}/${info.repeatTotal}${info.finished ? ' 已完成' : ''})`
+    : '';
+  return `⏰ #${info.timerId}「${info.label}」${progress}: ${info.action} → ${compactResult(info.result)}${info.finished ? ' [完成]' : ''}`;
+}
+
+/** For repeating timers, only notify LLM on 1st tick, every 5th tick, and last tick. */
+function shouldNotifyLLM(info: TimerNotification): boolean {
+  if (info.repeatTotal <= 1) return true;
+  if (info.repeatDone === 1) return true;
+  if (info.finished) return true;
+  if (info.repeatDone % 5 === 0) return true;
+  return false;
+}
+
+async function handleTimerFire(info: TimerNotification): Promise<void> {
+  // Always show notification in chat UI + refresh timer panel
+  chat.addToolNotification(
+    `⏰ 定时器 #${info.timerId} ${info.repeatTotal > 1 ? `(${info.repeatDone}/${info.repeatTotal})` : ''}`,
+    { action: info.action, ...info.actionArgs },
+    info.result,
+  );
+  refreshTimerPanel();
+
+  // For repeating timers, skip LLM notification on intermediate ticks to save tokens
+  if (!shouldNotifyLLM(info)) return;
+
+  // If LLM is busy, queue for later
+  if (isProcessing) {
+    if (pendingTimerNotifications.length < MAX_PENDING_NOTIFICATIONS) {
+      pendingTimerNotifications.push(info);
+    }
+    return;
+  }
+
+  await sendTimerNotificationToLLM([info]);
+}
+
+async function drainPendingTimerNotifications(): Promise<void> {
+  if (pendingTimerNotifications.length === 0 || isProcessing) return;
+  const batch = pendingTimerNotifications.splice(0);
+  await sendTimerNotificationToLLM(batch);
+}
+
+async function sendTimerNotificationToLLM(notifications: TimerNotification[]): Promise<void> {
+  // Build compact message for LLM
+  const lines = notifications.map(formatTimerMessage);
+  lines.push('请根据以上定时器执行结果决定是否需要进一步操作或告知用户。');
+  const sysMsg = lines.join('\n');
+
+  // Show system message in chat so user sees the trigger context
+  chat.addSystemMessage(notifications.map(formatTimerMessage).join('\n'));
+
+  // Use 'system' semantics but push as 'user' for API compatibility,
+  // with a clear [SYSTEM] prefix so LLM distinguishes from real user input
+  conversationHistory.push({ role: 'user', content: `[系统定时器通知]\n${sysMsg}` });
+  pruneConversationHistory();
+
+  isProcessing = true;
+  chat.setInputEnabled(false);
+  chat.showTyping();
+  currentAssistantMsgId = null;
+
+  // Set timer-triggered flag so LLM cannot create new timers in this turn
+  if (toolsMod?.setTimerTriggeredTurn) toolsMod.setTimerTriggeredTurn(true);
+
+  // Timeout race for LLM call
+  const LLM_TIMEOUT = 30_000;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    if (!ai) return;
+
+    const customPrompt = ($('custom-system-prompt') as HTMLTextAreaElement | null)?.value || '';
+    const systemPrompt: string = toolsMod?.buildSystemPrompt
+      ? toolsMod.buildSystemPrompt(activePresetId, customPrompt)
+      : customPrompt || '你是一个友好的助手。';
+
+    const toolDefs = toolsMod?.tools || [];
+    let streamedText = '';
+
+    const chatPromise = ai.chat(
+      conversationHistory,
+      systemPrompt,
+      toolDefs,
+      async (toolName: string, toolArgs: Record<string, unknown>) => {
+        chat.hideTyping();
+        let result: string;
+        try {
+          result = toolsMod
+            ? await toolsMod.executeTool(toolName, toolArgs)
+            : JSON.stringify({ error: 'tools module not loaded' });
+        } catch (err: any) {
+          result = JSON.stringify({ error: err.message });
+        }
+        chat.addToolNotification(toolName, toolArgs, result);
+        return result;
+      },
+      (textChunk: string) => {
+        chat.hideTyping();
+        streamedText += textChunk;
+        currentAssistantMsgId = chat.addAssistantMessage(streamedText, currentAssistantMsgId || undefined);
+      },
+    );
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('定时器LLM调用超时(30s)')), LLM_TIMEOUT);
+    });
+
+    const response = await Promise.race([chatPromise, timeoutPromise]);
+
+    chat.hideTyping();
+    const finalContent = streamedText || response?.content || '';
+    if (finalContent) {
+      currentAssistantMsgId = chat.addAssistantMessage(finalContent, currentAssistantMsgId || undefined);
+      chat.finalizeAssistantMessage(currentAssistantMsgId);
+      conversationHistory.push({ role: 'assistant', content: finalContent });
+    }
+  } catch (err: any) {
+    chat.hideTyping();
+    const errMsg = err.message || String(err);
+    chat.addAssistantMessage(`定时器回调出错: ${errMsg}`);
+
+    // Auto-cancel all timers on auth/fatal errors
+    if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('API')) {
+      if (toolsMod?.clearAllTimers) toolsMod.clearAllTimers();
+      chat.addSystemMessage('因 API 错误，已自动取消所有定时器');
+      refreshTimerPanel();
+    }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (toolsMod?.setTimerTriggeredTurn) toolsMod.setTimerTriggeredTurn(false);
+    isProcessing = false;
+    chat.setInputEnabled(true);
+
+    if (currentConversation) {
+      currentConversation.messages = [...conversationHistory];
+      currentConversation.title = history.generateTitle(conversationHistory);
+      currentConversation.updatedAt = Date.now();
+      history.saveConversation(currentConversation);
+      renderHistoryList();
+    }
+
+    drainPendingTimerNotifications();
   }
 }
 
