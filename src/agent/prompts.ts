@@ -1,62 +1,27 @@
 /**
- * prompts.ts — System prompts and persona presets for DG-Agent.
- * Separated from tool execution for easier management.
+ * prompts.ts — Persona presets and the single entry point for building the
+ * system instructions sent to the LLM on every API call.
+ *
+ * The agent uses ONLY ONE prompt-injection location: the Responses API
+ * `instructions` field. The conversation `input` array stays a clean stream
+ * of user / assistant / tool items with no synthetic suffixes.
+ *
+ * `buildInstructions` is called once per LLM iteration and returns a string
+ * composed of:
+ *   1. {persona}                                    — static across the turn
+ *   2. [设备能力 — 静态参考]                          — static across all turns
+ *   3. [当前设备状态 — 系统观察]                      — refreshed every iter
+ *   4. [本回合策略]                                   — only on iter 0
  */
 
-import type { PromptPreset } from '../types';
+import type { DeviceState, PromptPreset } from '../types';
 import { tools } from './tools';
+import { MAX_ADD_STRENGTH_PER_TURN } from './policies';
 
-/**
- * 从 tools 定义自动生成工具清单，确保 prompt 与 tool schema 始终同步。
- */
-function buildToolList(): string {
-  return tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n');
-}
+// ---------------------------------------------------------------------------
+// Persona presets
+// ---------------------------------------------------------------------------
 
-/**
- * 设备能力说明 — 作为系统后缀追加到所有 prompt 后面。
- * 让 AI 在任何人设下都知道如何使用郊狼设备。
- */
-export function getDeviceSuffix(): string {
-  return `
-
-[系统能力说明 — 以下信息对用户不可见]
-你拥有一台已通过蓝牙连接的 DG-Lab 郊狼 (Coyote 3.0) 电脉冲设备，可以通过工具调用来实时控制它。
-
-可用工具（与你收到的 function 定义完全一致，请勿编造其他工具名；详细参数与用法见每个工具的 description）：
-${buildToolList()}
-
-典型操作流程：
-- 开始/调整刺激 → play（一次设定强度+波形）
-- 微调强度且不换波形 → add_strength
-- 需要自定义节奏 → design_wave
-- 结束刺激 → stop（一次关闭强度+波形）
-- 查看当前状态 → get_status
-
-设备参数：
-- 两个独立输出通道：A 和 B，可分别设置强度和波形
-- 强度范围 0-200，务必从低强度(5-15)开始，根据用户反馈逐步调整
-- 可用波形预设：breath(呼吸/渐强渐弱)、tide(潮汐/波浪起伏)、pulse_low(低脉冲/轻柔)、pulse_mid(中脉冲/适中)、pulse_high(高脉冲/强烈)、tap(轻拍/节奏感)
-- 安全限制：设备强度会被自动限制在用户设定的安全上限内，无法超过
-- 随时关注用户的反馈和感受，及时调整强度和波形
-- 善于将语言描述与设备操作结合，用文字营造氛围的同时配合实际的体感刺激
-
-⚠️ 工具调用规则：
-- 涉及设备操作或需要查询设备状态时，你【必须】先调用对应的工具，拿到结果后再回复用户。严禁"嘴上说做了、实际没调用"
-- 正确顺序：调用工具 → 收到结果 → 根据结果回复。你只能通过调用工具来控制设备，回复文字中描述操作（如"我把强度设为20"）不会对设备产生任何效果
-- 收到工具结果后，请直接基于结果给出最终回复；不要为了凑数而再次调用 get_status 或重复操作。一轮对话内只在确有必要时才发起后续调用
-- 每次工具调用后，必须根据返回结果中的实际设备状态来回复用户，不要编造或假设结果
-- 如果工具返回了错误或与预期不同的结果，必须如实告知用户，不要假装操作成功
-- 注意：add_strength 每一轮对话最多只能调用 2 次（系统会强制限制）。需要大幅调整强度时请改用 play 一次性设定目标值
-- 强度和波形必须同时管理——这一点由工具设计强制执行：
-  · 开始或调整刺激 → 一律用 play（同时传 strength 和 preset/frequency+intensity），禁止想象有"只设强度"的工具
-  · 结束刺激 → 一律用 stop，禁止用 play(strength=0) 或任何变通手段来"关"设备
-  · 想只动强度不换波形 → 用 add_strength（仅限微调场景）`;
-}
-
-/**
- * 预设场景人设
- */
 export const PROMPT_PRESETS: PromptPreset[] = [
   {
     id: 'gentle',
@@ -149,21 +114,96 @@ export const PROMPT_PRESETS: PromptPreset[] = [
   },
 ];
 
-/** 默认选中的预设 ID */
 export const DEFAULT_PRESET_ID = 'gentle';
 
+// ---------------------------------------------------------------------------
+// Static reference block (built once at module load)
+// ---------------------------------------------------------------------------
+
 /**
- * 根据预设ID和可选的自定义prompt，构建最终的 System Prompt。
- * @param presetId — 预设 ID 或 'custom'
- * @param customPrompt — 自定义 prompt 内容（presetId='custom' 时使用）
+ * Build a concise one-line summary from each tool's description for the
+ * human-readable catalog block. Strip the leading 【tag】 and keep only the
+ * first sentence so the system prompt stays compact — the model still sees
+ * the full description via the function schema.
  */
-export function buildSystemPrompt(presetId: string, customPrompt?: string): string {
-  let persona = '';
-  if (presetId === 'custom') {
-    persona = customPrompt || '你是一个友好的助手。';
-  } else {
-    const preset = PROMPT_PRESETS.find((p) => p.id === presetId);
-    persona = preset ? preset.prompt : PROMPT_PRESETS[0].prompt;
+const TOOL_CATALOG = tools.map((t) => {
+  const firstLine = t.description.split('\n')[0].replace(/^【[^】]*】/, '');
+  const firstSentence = firstLine.split(/[。\n]/)[0] + '。';
+  return `  - ${t.name.padEnd(20)} ${firstSentence}`;
+}).join('\n');
+
+const DEVICE_REFERENCE_BLOCK = `[设备能力 — 静态参考，对用户不可见]
+你拥有一台已通过蓝牙连接的 DG-Lab 郊狼 (Coyote 3.0) 电脉冲设备。
+设备控制只能通过下面的工具完成；在文字里描述操作（例如"我把强度调到 20"）不会真的影响设备。
+
+可用工具（详细参数见各工具自己的 description）：
+${TOOL_CATALOG}
+
+设备参数：
+  • A / B 双通道独立控制
+  • 强度范围 0–200，新手从 5–15 起步，按反馈逐步增加
+  • 波形预设：breath（呼吸/最柔）、tide（潮汐）、pulse_low/mid/high（低/中/高脉冲）、tap（轻拍）
+  • 用户在 App 内设置的安全上限会自动夹紧，无法绕过
+  • 关闭设备只能用 stop；不要用 play(strength=0) 变通
+
+调用纪律：
+  1. 要做就先调工具再说话。不要在文字里写"已经/帮你/为你..."却没真的调用工具——说了不等于做了
+  2. 拿到工具结果后，请根据返回的 deviceState 回复用户，不要编造或想象设备状态
+  3. 工具返回错误时如实告诉用户，不要假装成功
+  4. 同一回合内 add_strength 最多调用 ${MAX_ADD_STRENGTH_PER_TURN} 次；达到上限后本回合不要再继续爬升强度，直接回复用户即可
+  5. 如果你需要知道当前设备状态，调 get_status；不要凭记忆猜
+  6. 拿到工具结果后请直接给出最终回复，不要为了"再确认一下"反复调用工具`;
+
+const FIRST_ITERATION_STRATEGY = `[本回合策略 — 仅本回合首次响应生效]
+本次响应建议先调用至少一个工具再生成文字回复：涉及设备操作就调对应工具；只是闲聊、没有合适的操作时调 get_status 兜底以便基于真实状态作答。拿到结果后请直接给出最终回复，不要为了凑数再调一次。`;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export interface BuildInstructionsOptions {
+  presetId: string;
+  customPrompt?: string;
+  deviceStatus: DeviceState;
+  isFirstIteration: boolean;
+}
+
+/**
+ * Build the full system instructions string for one LLM API call.
+ * Called once per iteration by the runner.
+ */
+export function buildInstructions(opts: BuildInstructionsOptions): string {
+  const persona = resolvePersona(opts.presetId, opts.customPrompt);
+  const statusBlock = buildDeviceStatusBlock(opts.deviceStatus);
+  const blocks = [
+    persona,
+    DEVICE_REFERENCE_BLOCK,
+    statusBlock,
+  ];
+  if (opts.isFirstIteration) {
+    blocks.push(FIRST_ITERATION_STRATEGY);
   }
-  return persona + getDeviceSuffix();
+  return blocks.join('\n\n──────────────────────────\n');
+}
+
+function resolvePersona(presetId: string, customPrompt?: string): string {
+  if (presetId === 'custom') {
+    return customPrompt || '你是一个友好的助手。';
+  }
+  const preset = PROMPT_PRESETS.find((p) => p.id === presetId);
+  return (preset || PROMPT_PRESETS[0]).prompt;
+}
+
+function buildDeviceStatusBlock(s: DeviceState): string {
+  const conn = s.connected
+    ? `已连接${s.deviceName ? `（${s.deviceName}）` : ''}`
+    : '未连接';
+  const battery = s.battery != null ? `${s.battery}%` : '未知';
+  return (
+    `[当前设备状态 — 系统观察，每次响应前由系统注入]\n` +
+    `  • 连接：${conn}\n` +
+    `  • 电量：${battery}\n` +
+    `  • A 通道：强度 ${s.strengthA}/${s.limitA}，波形${s.waveActiveA ? '活跃' : '停止'}\n` +
+    `  • B 通道：强度 ${s.strengthB}/${s.limitB}，波形${s.waveActiveB ? '活跃' : '停止'}`
+  );
 }

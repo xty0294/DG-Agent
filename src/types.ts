@@ -91,17 +91,27 @@ export function getItemText(item: ConversationItem): { role: 'user' | 'assistant
 // Chat callbacks
 // ---------------------------------------------------------------------------
 
-/** Callbacks for the AI chat function */
-export interface ChatCallbacks {
-  onToolCall: (name: string, args: Record<string, unknown>) => Promise<string>;
-  onStreamText?: (chunk: string) => void;
+/**
+ * AgentSink — single sink for all UI-facing events emitted by the runner.
+ * The runner does not know about UI state (msgIds, typing dots, etc).
+ * The conversation layer implements a sink that translates these events
+ * into concrete UI callback calls and manages bubble lifecycle internally.
+ */
+export interface AgentSink {
+  /** A streamed text delta arrived. `accumulated` is the full text so far. */
+  onTextDelta(accumulated: string): void;
+  /** The current streamed assistant message is final and should be locked in. */
+  onTextComplete(): void;
+  /** The current streamed assistant message must be discarded entirely (hallucination guard). */
+  onTextDiscard(): void;
   /**
-   * Called when the in-progress streamed assistant reply must be discarded
-   * (e.g. hallucination detected). The implementation should remove the
-   * current bubble from the UI and reset its streaming buffer so the next
-   * iteration starts a fresh assistant message.
+   * Render a complete assistant message that was NOT produced via streaming
+   * (e.g. the iteration-ceiling sentinel or a synthetic notice). The sink
+   * creates a fresh bubble and finalizes it immediately.
    */
-  onDiscardStream?: () => void;
+  onTextInline(text: string): void;
+  /** A tool call was executed. Notification only — the result is already in the LLM input. */
+  onToolCall(name: string, args: Record<string, unknown>, result: string): void;
 }
 
 // ---------------------------------------------------------------------------

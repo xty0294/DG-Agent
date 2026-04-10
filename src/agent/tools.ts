@@ -6,6 +6,7 @@
 import type { ToolDef, WaveStep } from '../types';
 import * as bt from './bluetooth';
 import { getMaxStrength } from './providers';
+import { clampStrengthLimit } from './policies';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -247,11 +248,13 @@ const registry: ToolEntry[] = [
     def: {
       name: 'set_strength_limit',
       description:
-        '【安全设置】设置 A/B 两个通道的强度上限。这是一道安全闸——所有 play/add_strength/design_wave 都会被限制在这个上限之内。\n\n' +
+        '【安全设置】设置 A/B 两个通道的设备侧强度上限。所有 play/add_strength/design_wave 的输出都会被限制在这个上限之内。\n\n' +
         '使用场景：\n' +
         '• 用户明确说"强度不要超过 X"时\n' +
         '• 初次连接或更换场景时，根据用户习惯预设一个安全范围\n\n' +
-        '注意：这个工具只设置上限，不会直接影响当前输出强度。',
+        '注意：\n' +
+        '• 这个工具只设置上限，不会直接影响当前输出强度\n' +
+        '• 用户在 App 内单独设置了一道更硬的安全上限，本工具传入的值会被自动夹紧到那个硬上限之内，无法突破。返回结果中的 actual 字段是真正写入设备的值，requested 是你请求的值',
       parameters: {
         type: 'object',
         properties: {
@@ -262,10 +265,15 @@ const registry: ToolEntry[] = [
       },
     },
     handler({ limit_a, limit_b }) {
-      const a = num(limit_a);
-      const b = num(limit_b);
-      bt.setStrengthLimit(a, b);
-      return { limit_a: a, limit_b: b };
+      const requestedA = num(limit_a);
+      const requestedB = num(limit_b);
+      const safe = clampStrengthLimit(requestedA, requestedB);
+      bt.setStrengthLimit(safe.a, safe.b);
+      return {
+        limit_a: { requested: requestedA, actual: safe.a },
+        limit_b: { requested: requestedB, actual: safe.b },
+        clamped_by_user_cap: safe.clamped,
+      };
     },
   },
   {
@@ -273,8 +281,10 @@ const registry: ToolEntry[] = [
       name: 'get_status',
       description:
         '【状态查询】获取设备当前真实状态：连接状态、电量、A/B 强度、A/B 波形是否活跃。\n\n' +
-        '用户询问"现在几档"、"强度多少"、"还在响吗"等状态问题时调用此工具。\n' +
-        '在没有其他更合适的工具可调用时（例如普通聊天、问候），也用 get_status 来满足"每轮至少调一个工具"的要求。',
+        '使用场景：\n' +
+        '• 用户询问"现在几档"、"强度多少"、"还在响吗"等状态问题\n' +
+        '• 你需要确认当前设备情况后再决定下一步操作\n' +
+        '• 你需要在回复中提及具体的强度/波形数值时（必须先调这个，不要凭记忆）',
       parameters: { type: 'object', properties: {} },
     },
     handler() {
@@ -291,9 +301,22 @@ export const tools: ToolDef[] = registry.map((t) => t.def);
 
 const handlerMap = new Map(registry.map((t) => [t.def.name, t.handler]));
 
+// Tools that require an active BLE connection. get_status is allowed even
+// when disconnected — it just returns the unconnected state.
+const REQUIRES_CONNECTION = new Set(['play', 'stop', 'add_strength', 'design_wave', 'set_strength_limit']);
+
 export async function executeTool(name: string, args: Record<string, any>): Promise<string> {
   const handler = handlerMap.get(name);
   if (!handler) return JSON.stringify({ error: `Unknown tool: ${name}` });
+
+  // Centralised disconnect guard: any mutating tool fails fast with a
+  // friendly error so the model can tell the user to reconnect.
+  if (REQUIRES_CONNECTION.has(name) && !bt.getStatus().connected) {
+    return JSON.stringify({
+      error: '设备未连接，无法执行该操作。请告知用户先在 App 内连接郊狼设备，再继续。',
+      deviceState: snap(),
+    });
+  }
 
   try {
     const result = handler(args);
@@ -301,7 +324,10 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     return JSON.stringify({
       success: true,
       ...result,
-      ...(!isGetStatus && { deviceState: snap(), _hint: '以上 deviceState 是设备当前真实状态，请根据此状态回复用户。' }),
+      ...(!isGetStatus && {
+        deviceState: snap(),
+        _hint: '以上 deviceState 是设备当前真实状态，请根据此状态回复用户。',
+      }),
     });
   } catch (err: unknown) {
     console.error(`[tools] ${name}:`, err);
