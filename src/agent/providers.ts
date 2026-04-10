@@ -48,7 +48,7 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (raw) return JSON.parse(raw) as AppSettings;
   } catch (_) { /* */ }
-  return { provider: 'free', configs: {}, presetId: 'gentle', customPrompt: '' };
+  return { provider: 'free', configs: {}, presetId: 'gentle', customPrompt: '', backgroundBehavior: 'stop' };
 }
 
 export function saveSettings(settings: AppSettings): void {

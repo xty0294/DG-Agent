@@ -6,7 +6,7 @@
 import type { ConversationItem, ToolDef, ChatCallbacks } from '../types';
 import { loadSettings } from './providers';
 
-const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOOL_ITERATIONS = 20;
 const FREE_PROXY_URL = 'https://dg-agent-proxy.0xnullai.workers.dev';
 
 // ---------------------------------------------------------------------------

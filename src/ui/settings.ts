@@ -3,6 +3,7 @@
  */
 
 import { PROVIDERS, loadSettings, saveSettings as persistSettings } from '../agent/providers';
+import type { AppSettings } from '../types';
 import { $ } from './index';
 
 let activePresetIdRef: () => string;
@@ -19,6 +20,7 @@ export function open(): void {
   updateCurrentAiLabel();
   renderTabs();
   renderConfig(saved.provider);
+  renderBehaviorSettings(saved);
 }
 
 export function close(): void {
@@ -57,6 +59,60 @@ export function saveCurrentSettings(): void {
   saved.customPrompt = customPromptRef();
 
   persistSettings(saved);
+}
+
+export function getBackgroundBehavior(): 'stop' | 'keep' {
+  return loadSettings().backgroundBehavior || 'stop';
+}
+
+function renderBehaviorSettings(saved: AppSettings): void {
+  const container = $('provider-config')!;
+
+  const section = document.createElement('div');
+  section.className = 'behavior-settings';
+
+  const title = document.createElement('h3');
+  title.className = 'behavior-settings-title';
+  title.textContent = '安全设置';
+  section.appendChild(title);
+
+  const group = document.createElement('div');
+  group.className = 'setting-group setting-group-inline';
+
+  const label = document.createElement('label');
+  label.textContent = '切换后台时停止输出';
+  label.htmlFor = 'cfg-bg-behavior';
+
+  const toggle = document.createElement('button');
+  toggle.id = 'cfg-bg-behavior';
+  const isStop = (saved.backgroundBehavior || 'stop') === 'stop';
+  toggle.className = 'toggle-btn' + (isStop ? ' active' : '');
+  toggle.setAttribute('role', 'switch');
+  toggle.setAttribute('aria-checked', String(isStop));
+
+  const knob = document.createElement('span');
+  knob.className = 'toggle-knob';
+  toggle.appendChild(knob);
+
+  toggle.addEventListener('click', () => {
+    const current = toggle.classList.contains('active');
+    toggle.classList.toggle('active', !current);
+    toggle.setAttribute('aria-checked', String(!current));
+    const s = loadSettings();
+    s.backgroundBehavior = current ? 'keep' : 'stop';
+    persistSettings(s);
+  });
+
+  group.appendChild(label);
+  group.appendChild(toggle);
+  section.appendChild(group);
+
+  const hint = document.createElement('p');
+  hint.className = 'provider-hint';
+  hint.textContent = '开启后，切换到其他应用或标签页时将自动停止所有波形并将强度归零';
+  section.appendChild(hint);
+
+  container.appendChild(section);
 }
 
 function renderTabs(): void {

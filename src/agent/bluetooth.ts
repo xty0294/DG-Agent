@@ -604,3 +604,32 @@ export function getStatus(): DeviceState {
 export function getStrengthLimits(): { limitA: number; limitB: number } {
   return { limitA: state.limitA, limitB: state.limitB };
 }
+
+/**
+ * Emergency full stop: stop all waveforms and set both channels to zero.
+ * Designed for page unload / background scenarios — fire-and-forget.
+ */
+export function emergencyStop(): void {
+  // Stop waveforms
+  waveState.A.active = false;
+  waveState.A.frames = null;
+  waveState.A.index = 0;
+  waveState.B.active = false;
+  waveState.B.frames = null;
+  waveState.B.index = 0;
+
+  // Set strength to zero (absolute mode = 3)
+  pendingStrA = 0;
+  pendingStrB = 0;
+  pendingMode = (3 << 2) | 3; // absolute zero for both channels
+
+  // Send one final B0 immediately if possible
+  if (writeChar) {
+    try {
+      const cmd = buildB0();
+      writeChar.writeValueWithoutResponse(cmd);
+    } catch (_) { /* best effort */ }
+  }
+
+  notify();
+}

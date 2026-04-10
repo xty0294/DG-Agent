@@ -133,6 +133,8 @@ export interface AppSettings {
   configs: Record<string, Record<string, string>>;
   presetId: string;
   customPrompt: string;
+  /** Behavior when app goes to background: 'stop' = stop all output, 'keep' = no change */
+  backgroundBehavior?: 'stop' | 'keep';
 }
 
 /** Provider field definition */

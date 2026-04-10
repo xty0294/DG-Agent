@@ -979,6 +979,61 @@ html, body {
   line-height: 1.5;
 }
 
+/* ---------- Behavior settings ---------- */
+.behavior-settings {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.behavior-settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.setting-group-inline {
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+/* ---------- Toggle switch ---------- */
+.toggle-btn {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: var(--border);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.toggle-btn.active {
+  background: var(--accent);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--transition);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.toggle-btn.active .toggle-knob {
+  transform: translateX(20px);
+}
+
 /* ============================================================
    BUTTONS
    ============================================================ */

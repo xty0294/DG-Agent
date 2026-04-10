@@ -353,16 +353,25 @@ export function boot(): void {
     showWelcomeMessage();
   }
 
-  // Safety: clean up on page unload
-  window.addEventListener('beforeunload', () => {
-    try { bluetooth.stopWave(null); } catch (_) { /* */ }
+  // Safety: full stop on page unload (close tab / close browser)
+  function fullStop(): void {
+    if (bluetooth.state.connected) {
+      try { bluetooth.emergencyStop(); } catch (_) { /* */ }
+    }
+  }
+  window.addEventListener('beforeunload', fullStop);
+  window.addEventListener('pagehide', fullStop);
+
+  // Background / foreground lifecycle
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && settings.getBackgroundBehavior() === 'stop') {
+      fullStop();
+    }
   });
 
   // Emergency stop button
   $('btn-emergency-stop')?.addEventListener('click', async () => {
-    try { await executeTool('stop_wave', {}); } catch (_) { /* */ }
-    try { await executeTool('set_strength', { channel: 'A', value: 0 }); } catch (_) { /* */ }
-    try { await executeTool('set_strength', { channel: 'B', value: 0 }); } catch (_) { /* */ }
+    try { await executeTool('stop', {}); } catch (_) { /* */ }
     chat.addSystemMessage('\u26A1 紧急停止：已停止所有波形、强度归零');
   });
 }
