@@ -1572,3 +1572,239 @@ body.safety-notice-open {
   opacity: 1;
   background: rgba(255, 255, 255, 0.18);
 }
+
+/* ============================================================
+   Permission dialog (per-tool-call approval)
+   ============================================================ */
+.permission-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top))
+           max(16px, env(safe-area-inset-right))
+           max(16px, env(safe-area-inset-bottom))
+           max(16px, env(safe-area-inset-left));
+  animation: perm-fade-in 0.18s ease-out;
+  overscroll-behavior: contain;
+}
+@keyframes perm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.permission-modal {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  width: 100%;
+  max-width: 440px;
+  max-height: 90dvh;
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: perm-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@keyframes perm-pop {
+  from { transform: translateY(12px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.permission-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.permission-subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: -6px;
+}
+
+.permission-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  border-radius: 8px;
+  margin-top: 4px;
+}
+.permission-tool-label {
+  font-size: 12px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.permission-tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.permission-args-label {
+  font-size: 12px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+.permission-args {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.permission-description {
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.permission-raw-details {
+  margin-top: 2px;
+}
+.permission-raw-details > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+  padding: 4px 0;
+  user-select: none;
+  list-style: none;
+}
+.permission-raw-details > summary::-webkit-details-marker {
+  display: none;
+}
+.permission-raw-details > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.permission-raw-details[open] > summary::before {
+  content: '▾ ';
+}
+.permission-raw-details > summary:hover {
+  color: var(--accent);
+}
+.permission-raw-details[open] > .permission-args {
+  margin-top: 6px;
+}
+
+.permission-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+.permission-btn {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.05s, border-color 0.15s;
+}
+.permission-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.permission-btn:active { transform: scale(0.97); }
+
+.permission-btn-deny {
+  grid-column: 1 / 2;
+  color: #d94a4a;
+  border-color: rgba(217, 74, 74, 0.4);
+}
+.permission-btn-deny:hover {
+  background: rgba(217, 74, 74, 0.1);
+  border-color: #d94a4a;
+}
+.permission-btn-once {
+  grid-column: 2 / 3;
+}
+.permission-btn-timed {
+  grid-column: 1 / 2;
+}
+.permission-btn-always {
+  grid-column: 2 / 3;
+  background: var(--accent);
+  color: var(--user-text);
+  border-color: var(--accent);
+}
+.permission-btn-always:hover {
+  filter: brightness(1.08);
+  background: var(--accent);
+}
+
+@media (max-width: 480px) {
+  .permission-modal {
+    padding: 18px 16px 14px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+  .permission-title { font-size: 15px; }
+  .permission-subtitle { font-size: 12.5px; }
+  .permission-description { font-size: 13.5px; padding: 11px 12px; }
+
+  /* Single-column buttons so long Chinese labels never truncate, with
+     bigger tap targets (≥44px) and a safer top-to-bottom order:
+     allow-once → timed → always → deny. */
+  .permission-buttons {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .permission-btn {
+    padding: 14px 14px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .permission-btn-deny,
+  .permission-btn-once,
+  .permission-btn-timed,
+  .permission-btn-always {
+    grid-column: 1 / -1;
+  }
+  .permission-btn-once   { order: 1; }
+  .permission-btn-timed  { order: 2; }
+  .permission-btn-always { order: 3; }
+  .permission-btn-deny   { order: 4; }
+}
+
+/* Landscape phones: viewport is very short, shrink vertical spacing
+   and allow internal scrolling via the modal's max-height. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .permission-modal {
+    padding: 14px 18px 12px;
+    gap: 8px;
+  }
+  .permission-title { font-size: 14px; }
+  .permission-subtitle { margin-top: -4px; }
+  .permission-description { padding: 9px 12px; font-size: 13px; }
+  .permission-args { max-height: 100px; }
+}

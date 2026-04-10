@@ -14,6 +14,7 @@ import * as settings from './settings';
 import * as sidebar from './sidebar';
 import { updateDeviceUI } from './device';
 import { initUpdateCheck } from './update-check';
+import { askPermission, closeActiveDialog } from './permission-dialog';
 
 // ---------------------------------------------------------------------------
 // DOM helper (shared across ui modules)
@@ -323,12 +324,18 @@ export function boot(): void {
     onTypingEnd: () => chat.hideTyping(),
     onError: (msg) => chat.addAssistantMessage(msg),
     onHistoryChange: () => sidebar.renderList(),
+    onRequestPermission: (name, args) => askPermission(name, args),
   });
 
   // Init sub-modules
   chat.initChat({
     onSendMessage: handleSendMessage,
-    onAbort: () => conversation.abortCurrent(),
+    onAbort: () => {
+      // Close any open permission dialog first so its promise resolves as
+      // 'deny' and the runner can unwind cleanly into the abort branch.
+      closeActiveDialog();
+      conversation.abortCurrent();
+    },
   });
   settings.init(
     () => conversation.getActivePresetId(),

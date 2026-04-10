@@ -46,6 +46,16 @@ export interface RunTurnInput {
   sink: AgentSink;
   /** Optional cancel signal — honoured at loop start and inside fetch. */
   signal?: AbortSignal;
+  /**
+   * Optional permission gate for mutating tool calls. When provided, the
+   * runner consults this function for each tool execution (after caps,
+   * before the executor) and expects a simple allow/deny decision. The
+   * caller owns the grant cache and UI interaction.
+   */
+  requestPermission?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<'allow' | 'deny'>;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -213,11 +223,31 @@ async function executeOneCall(
     });
   }
 
-  // Count it (even on executor failure — the model already attempted it)
+  // Permission gate (may await user input via a modal dialog). Runs before
+  // any counters are touched for non-counted scenarios — but once we reach
+  // this point the model has committed to a call, so we always count it
+  // against the per-turn caps regardless of the user's decision.
+  let permissionDenied = false;
+  if (input.requestPermission) {
+    const decision = await input.requestPermission(name, args);
+    if (decision === 'deny') permissionDenied = true;
+  }
+
+  // Count it (even on executor failure — the model already attempted it).
+  // Note: `mutatingToolCalled` is NOT set on a deny, so the action-claim
+  // hallucination guard still fires if the model pretends the denied
+  // operation succeeded.
   state.totalToolCalls++;
   state.anyToolCalled = true;
-  if (isMutatingTool(name)) state.mutatingToolCalled = true;
+  if (!permissionDenied && isMutatingTool(name)) state.mutatingToolCalled = true;
   if (name === 'add_strength') state.addStrengthCalls++;
+
+  if (permissionDenied) {
+    return JSON.stringify({
+      error:
+        '用户拒绝了本次工具调用。请不要立即用相同参数重试，也不要在回复里声称已经执行。改为询问用户是否愿意改用别的方式，或直接给出文字建议。',
+    });
+  }
 
   try {
     const result = await input.executor(name, args);

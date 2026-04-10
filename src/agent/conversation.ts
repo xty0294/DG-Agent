@@ -19,6 +19,12 @@ import { tools, executeTool } from './tools';
 import * as bt from './bluetooth';
 import { runTurn } from './runner';
 import { resolveProviderConfig } from './transport';
+import {
+  requiresPermission,
+  hasGrant,
+  recordChoice,
+  type PermissionChoice,
+} from './permissions';
 
 // ---------------------------------------------------------------------------
 // UI callback contract
@@ -34,6 +40,16 @@ export interface ConversationCallbacks {
   onTypingEnd: () => void;
   onError: (message: string) => void;
   onHistoryChange: () => void;
+  /**
+   * Prompt the user to allow or deny a mutating tool call. The UI should
+   * show a modal with the four standard scopes (once / timed / always /
+   * deny). If omitted, the conversation layer defaults to allow — useful
+   * for tests and backwards compat.
+   */
+  onRequestPermission?: (
+    toolName: string,
+    args: Record<string, unknown>,
+  ) => Promise<PermissionChoice>;
 }
 
 let callbacks: ConversationCallbacks | null = null;
@@ -219,6 +235,19 @@ export async function sendMessage(text: string, customPrompt: string): Promise<v
   const abort = new AbortController();
   currentAbort = abort;
 
+  // Permission gate: consult cache first, only hit the UI on a miss, then
+  // record the user's decision before returning it to the runner.
+  const requestPermission = async (
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<'allow' | 'deny'> => {
+    if (!requiresPermission(name)) return 'allow';
+    if (hasGrant(name)) return 'allow';
+    if (!cb.onRequestPermission) return 'allow';
+    const choice = await cb.onRequestPermission(name, args);
+    return recordChoice(name, choice);
+  };
+
   try {
     const finalItems = await runTurn({
       conversationItems: store.items,
@@ -235,6 +264,7 @@ export async function sendMessage(text: string, customPrompt: string): Promise<v
       transportConfig: resolveProviderConfig(),
       sink,
       signal: abort.signal,
+      requestPermission,
     });
 
     store.items.push(...finalItems);
