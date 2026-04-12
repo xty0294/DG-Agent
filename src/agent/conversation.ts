@@ -17,7 +17,7 @@
 import type { AgentSink, ConversationItem, ConversationRecord } from '../types';
 import * as history from './history';
 import { buildInstructions } from './prompts';
-import { tools, executeTool } from './tools';
+import { getTools, executeTool } from './tools';
 import * as bt from './bluetooth';
 import { runTurn } from './runner';
 import { resolveProviderConfig } from './transport';
@@ -291,7 +291,7 @@ export async function sendMessage(text: string, customPrompt: string): Promise<v
           turnToolCalls,
         }),
       getDeviceStatus: bt.getStatus,
-      tools,
+      tools: getTools(),
       executor: executeTool,
       transportConfig: resolveProviderConfig(),
       sink,

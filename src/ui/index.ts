@@ -5,7 +5,7 @@
 
 import type { ConversationRecord } from '../types';
 import { getItemText } from '../types';
-import { bluetooth, conversation, history, PROMPT_PRESETS, executeTool } from '../agent';
+import { bluetooth, conversation, history, PROMPT_PRESETS, executeTool, cancelAllBurstRestores } from '../agent';
 import { loadSettings } from '../agent/providers';
 import * as chat from './chat';
 import * as theme from './theme';
@@ -404,8 +404,11 @@ export function boot(): void {
     showWelcomeMessage();
   }
 
-  // Safety: full stop on page unload (close tab / close browser)
+  // Safety: full stop on page unload (close tab / close browser) and on
+  // visibility change. Always cancel pending burst-restores first so a
+  // backgrounded page can't revive the device after the emergency stop.
   function fullStop(): void {
+    try { cancelAllBurstRestores(); } catch (_) { /* */ }
     if (bluetooth.state.connected) {
       try { bluetooth.emergencyStop(); } catch (_) { /* */ }
     }

@@ -15,17 +15,15 @@ export interface DeviceState {
 /** Channel identifier */
 export type Channel = 'A' | 'B';
 
-/** Waveform preset name */
-export type WavePreset = 'breath' | 'tide' | 'pulse_low' | 'pulse_mid' | 'pulse_high' | 'tap';
-
 /** A single waveform frame: [encoded_frequency, intensity] */
 export type WaveFrame = [number, number];
 
-/** Custom wave step descriptor */
-export interface WaveStep {
-  freq: number;
-  intensity: number;
-  repeat?: number;
+/** A user-managed waveform in the library. */
+export interface UserWaveform {
+  id: string;
+  name: string;
+  description: string;
+  frames: WaveFrame[];
 }
 
 /** Unified AI tool definition */

@@ -16,6 +16,7 @@ import {
 } from '../agent/permissions';
 import type { AppSettings, PermissionMode } from '../types';
 import * as bluetooth from '../agent/bluetooth';
+import * as waveforms from '../agent/waveforms';
 import { updateStrengthCapMarker } from './device';
 import { $ } from './index';
 
@@ -31,7 +32,7 @@ export function init(getPresetId: () => string, getCustomPrompt: () => string): 
 // settings modal is open; cleaned up on close.
 let permissionCountdownTimer: number | null = null;
 
-type TopTab = 'api' | 'security';
+type TopTab = 'api' | 'security' | 'waveforms';
 let activeTopTab: TopTab = 'security';
 
 export function open(): void {
@@ -43,6 +44,7 @@ export function open(): void {
   renderTabs();
   renderConfig(saved.provider);
   renderBehaviorSettings(saved);
+  renderWaveformsPanel();
   updateTopPanelVisibility();
   startPermissionCountdown();
 }
@@ -53,6 +55,7 @@ function renderTopTabs(): void {
 
   const tabs: Array<{ id: TopTab; label: string }> = [
     { id: 'security', label: '安全' },
+    { id: 'waveforms', label: '波形' },
     { id: 'api', label: 'API' },
   ];
 
@@ -76,6 +79,7 @@ function renderTopTabs(): void {
 function updateTopPanelVisibility(): void {
   $('settings-panel-api')!.classList.toggle('hidden', activeTopTab !== 'api');
   $('settings-panel-security')!.classList.toggle('hidden', activeTopTab !== 'security');
+  $('settings-panel-waveforms')!.classList.toggle('hidden', activeTopTab !== 'waveforms');
 }
 
 export function close(): void {
@@ -406,6 +410,133 @@ function renderPermissionModeControl(parent: HTMLElement): void {
   // Initial countdown render (covers the case where user reopens settings
   // during a still-valid timed window).
   updatePermissionCountdownUI();
+}
+
+// ---------------------------------------------------------------------------
+// Waveform library panel
+// ---------------------------------------------------------------------------
+
+function renderWaveformsPanel(): void {
+  const container = $('waveforms-config');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Action bar
+  const actions = document.createElement('div');
+  actions.className = 'waveform-actions';
+
+  const importBtn = document.createElement('button');
+  importBtn.type = 'button';
+  importBtn.className = 'btn-primary';
+  importBtn.textContent = '导入波形…';
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.pulse,.zip';
+  fileInput.multiple = true;
+  fileInput.style.display = 'none';
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files || fileInput.files.length === 0) return;
+    const files = Array.from(fileInput.files);
+    fileInput.value = '';
+    const { added, errors } = await waveforms.importFiles(files);
+    renderWaveformsPanel();
+    if (errors.length > 0) {
+      alert(`已导入 ${added.length} 个波形\n\n失败：\n${errors.join('\n')}`);
+    }
+  });
+  importBtn.addEventListener('click', () => fileInput.click());
+
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.className = 'btn-secondary';
+  restoreBtn.textContent = '恢复默认';
+  restoreBtn.addEventListener('click', () => {
+    if (!confirm('恢复默认会清空当前波形库并重新载入六个内置波形，确定继续？')) return;
+    waveforms.restoreDefaults();
+    renderWaveformsPanel();
+  });
+
+  actions.appendChild(importBtn);
+  actions.appendChild(restoreBtn);
+  actions.appendChild(fileInput);
+  container.appendChild(actions);
+
+  // List
+  const list = waveforms.getAll();
+
+  // Hint — combines usage instructions and the count warning. Every waveform
+  // adds to the tool schema the AI has to read each turn, which noticeably
+  // slows response time once the library grows past ~10 entries.
+  const hint = document.createElement('p');
+  hint.className = 'provider-hint';
+  const over = list.length > 10;
+  const countLine = over
+    ? `⚠️ 当前 ${list.length} 个波形，超过 10 个会显著拖慢 AI 响应速度，建议精简。`
+    : `当前 ${list.length} 个波形，建议不超过 10 个——波形数量会影响 AI 性能。`;
+  hint.textContent =
+    '支持导入单个 .pulse 文件或包含多个 .pulse 的 .zip 压缩包。导入后可手动编辑名称和说明，这些信息会被 AI 用来选择合适的波形。' +
+    '\n\n' + countLine;
+  hint.style.whiteSpace = 'pre-line';
+  if (over) hint.style.color = 'var(--color-danger, #d33)';
+  container.appendChild(hint);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'waveform-list';
+
+  if (list.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'waveform-empty';
+    empty.textContent = '波形库为空，请先导入或恢复默认。';
+    listEl.appendChild(empty);
+  }
+
+  for (const w of list) {
+    const row = document.createElement('div');
+    row.className = 'waveform-row';
+    row.dataset.id = w.id;
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'waveform-name-input';
+    nameInput.value = w.name;
+    nameInput.placeholder = '名称';
+    nameInput.addEventListener('change', () => {
+      waveforms.updateMeta(w.id, { name: nameInput.value.trim() || w.id });
+    });
+
+    const descInput = document.createElement('input');
+    descInput.type = 'text';
+    descInput.className = 'waveform-desc-input';
+    descInput.value = w.description;
+    descInput.placeholder = '说明（会显示给 AI 用于选择）';
+    descInput.addEventListener('change', () => {
+      waveforms.updateMeta(w.id, { description: descInput.value.trim() });
+    });
+
+    const meta = document.createElement('div');
+    meta.className = 'waveform-meta';
+    meta.textContent = `${w.frames.length} 帧`;
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'waveform-del';
+    delBtn.textContent = '删除';
+    delBtn.disabled = list.length <= 1;
+    delBtn.title = delBtn.disabled ? '至少保留一个波形' : '删除此波形';
+    delBtn.addEventListener('click', () => {
+      if (!confirm(`确定删除波形「${w.name}」？`)) return;
+      if (waveforms.remove(w.id)) renderWaveformsPanel();
+    });
+
+    row.appendChild(nameInput);
+    row.appendChild(descInput);
+    row.appendChild(meta);
+    row.appendChild(delBtn);
+    listEl.appendChild(row);
+  }
+
+  container.appendChild(listEl);
 }
 
 function normalizeCap(raw: unknown): number {

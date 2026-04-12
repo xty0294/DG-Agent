@@ -20,6 +20,7 @@ import {
   MAX_TOOL_ITERATIONS,
   MAX_TOOL_CALLS_PER_TURN,
   MAX_ADJUST_STRENGTH_PER_TURN,
+  MAX_BURST_PER_TURN,
 } from './policies';
 import type { TurnToolCall } from './prompts';
 import { callResponses, type TransportConfig } from './transport';
@@ -84,6 +85,8 @@ interface RunnerState {
   totalToolCalls: number;
   /** adjust_strength calls so far this turn. */
   adjustStrengthCalls: number;
+  /** burst calls so far this turn. */
+  burstCalls: number;
 }
 
 function newState(): RunnerState {
@@ -91,6 +94,7 @@ function newState(): RunnerState {
     workingItems: [],
     totalToolCalls: 0,
     adjustStrengthCalls: 0,
+    burstCalls: 0,
   };
 }
 
@@ -250,6 +254,13 @@ async function executeOneCall(
     });
   }
 
+  // Hard cap: burst per turn
+  if (name === 'burst' && state.burstCalls >= MAX_BURST_PER_TURN) {
+    return JSON.stringify({
+      error: `burst 本回合调用已达上限 (${MAX_BURST_PER_TURN} 次)，本次调用被拒绝。短时突增刺激每回合只允许一次，请直接回复用户，不要重复触发。`,
+    });
+  }
+
   // Permission gate. May block on a modal dialog.
   let permissionDenied = false;
   if (input.requestPermission) {
@@ -262,6 +273,7 @@ async function executeOneCall(
   // MAX_TOOL_CALLS_PER_TURN.
   state.totalToolCalls++;
   if (name === 'adjust_strength') state.adjustStrengthCalls++;
+  if (name === 'burst') state.burstCalls++;
 
   if (permissionDenied) {
     return JSON.stringify({

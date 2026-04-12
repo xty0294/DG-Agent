@@ -9,6 +9,7 @@
  */
 
 import type { PermissionChoice } from '../agent/permissions';
+import * as waveforms from '../agent/waveforms';
 
 interface ActiveDialog {
   backdrop: HTMLDivElement;
@@ -160,23 +161,15 @@ function formatArgs(args: Record<string, unknown>): string {
 // Human-readable tool-call descriptions
 // ---------------------------------------------------------------------------
 
-const WAVE_LABELS: Record<string, string> = {
-  breath: '呼吸（最柔）',
-  tide: '潮汐',
-  pulse_low: '低脉冲',
-  pulse_mid: '中脉冲',
-  pulse_high: '高脉冲',
-  tap: '敲击',
-};
-
 function chLabel(ch: unknown): string {
   const c = typeof ch === 'string' ? ch.toUpperCase() : '';
   return c === 'A' || c === 'B' ? `${c} 通道` : '';
 }
 
-function waveLabel(preset: unknown): string {
-  if (typeof preset !== 'string') return '';
-  return WAVE_LABELS[preset] || preset;
+function waveLabel(id: unknown): string {
+  if (typeof id !== 'string') return '';
+  const w = waveforms.getById(id);
+  return w ? w.name : id;
 }
 
 /**
@@ -189,8 +182,7 @@ function describeToolCall(name: string, args: Record<string, unknown>): string {
   switch (name) {
     case 'start': {
       const strength = args.strength;
-      const preset = args.preset;
-      return `启动 ${ch || '通道'}：播放「${waveLabel(preset)}」波形，强度 ${strength}`;
+      return `启动 ${ch || '通道'}：播放「${waveLabel(args.waveform)}」波形，强度 ${strength}`;
     }
 
     case 'stop': {
@@ -208,16 +200,14 @@ function describeToolCall(name: string, args: Record<string, unknown>): string {
       return `${ch || '通道'} 强度${verb} ${sign}${delta}（在当前波形上微调）`;
     }
 
-    case 'change_wave': {
-      const preset = args.preset;
-      return `${ch || '通道'} 切换波形为「${waveLabel(preset)}」（强度不变）`;
-    }
+    case 'change_wave':
+      return `${ch || '通道'} 切换波形为「${waveLabel(args.waveform)}」（强度不变）`;
 
-    case 'design_wave': {
+    case 'burst': {
       const strength = args.strength;
-      const steps = args.steps;
-      const stepCount = Array.isArray(steps) ? steps.length : 0;
-      return `在 ${ch || '通道'} 播放自定义多步波形（${stepCount} 步），强度调至 ${strength}`;
+      const duration = Number(args.duration_ms);
+      const secs = Number.isFinite(duration) ? (duration / 1000).toFixed(1) : '?';
+      return `${ch || '通道'} 短时突增：强度瞬间拉到 ${strength}，持续 ${secs} 秒后自动回落`;
     }
 
     default:

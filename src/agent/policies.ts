@@ -20,6 +20,12 @@ export const MAX_TOOL_CALLS_PER_TURN = 5;
 /** Hard ceiling on adjust_strength calls within a single user turn. */
 export const MAX_ADJUST_STRENGTH_PER_TURN = 2;
 
+/** Hard ceiling on burst calls within a single user turn. */
+export const MAX_BURST_PER_TURN = 1;
+
+/** Hard ceiling on the duration of a single burst, in milliseconds. */
+export const MAX_BURST_DURATION_MS = 5000;
+
 /**
  * Hard ceiling on the strength `start` may write. Cold-starting a stopped
  * channel must always be a soft start — the model can never blast the user
@@ -38,7 +44,7 @@ const MUTATING_TOOLS = new Set<string>([
   'stop',
   'adjust_strength',
   'change_wave',
-  'design_wave',
+  'burst',
 ]);
 
 export function isMutatingTool(name: string): boolean {

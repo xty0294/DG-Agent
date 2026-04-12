@@ -3,7 +3,7 @@
  * Pure ES module implementing the full BLE protocol.
  */
 
-import type { DeviceState, Channel, WavePreset, WaveFrame, WaveStep } from '../types';
+import type { DeviceState, Channel, WaveFrame } from '../types';
 
 // ---------------------------------------------------------------------------
 // Minimal Web Bluetooth type declarations (not in standard DOM lib)
@@ -43,37 +43,9 @@ const NOTIFY_CHAR = '0000150b-0000-1000-8000-00805f9b34fb';
 const BATTERY_SERVICE = '0000180a-0000-1000-8000-00805f9b34fb';
 const BATTERY_CHAR = '00001500-0000-1000-8000-00805f9b34fb';
 
-// ---------------------------------------------------------------------------
-// Preset waveforms  –  each entry is [encoded_freq, intensity]
-// ---------------------------------------------------------------------------
-const PRESETS: Record<WavePreset, WaveFrame[]> = {
-  breath: [
-    [10, 0], [10, 20], [10, 40], [10, 60], [10, 80], [10, 100],
-    [10, 100], [10, 100], [10, 0], [10, 0], [10, 0], [10, 0],
-  ],
-  tide: [
-    [10, 0], [11, 16], [13, 33], [14, 50], [16, 66], [18, 83], [19, 100],
-    [21, 92], [22, 84], [24, 76], [26, 68], [26, 0], [27, 16], [29, 33],
-    [30, 50], [32, 66], [34, 83], [35, 100], [37, 92], [38, 84], [40, 76], [42, 68],
-  ],
-  pulse_low: Array.from({ length: 10 }, (): WaveFrame => [10, 30]),
-  pulse_mid: Array.from({ length: 10 }, (): WaveFrame => [10, 60]),
-  pulse_high: Array.from({ length: 10 }, (): WaveFrame => [10, 100]),
-  tap: [
-    [10, 100], [10, 0], [10, 0], [10, 100], [10, 0], [10, 0],
-  ],
-};
-
-// ---------------------------------------------------------------------------
-// Frequency encoding helper
-// ---------------------------------------------------------------------------
-function encodeFrequency(freqMs: number): number {
-  const f = Number(freqMs);
-  if (!Number.isFinite(f) || f < 10 || f > 1000) return 10;
-  if (f <= 100) return Math.floor(f);
-  if (f <= 600) return Math.floor((f - 100) / 5) + 100;
-  return Math.floor((f - 600) / 10) + 200;
-}
+// Frequency/strength encoding for waveforms is now handled upstream in the
+// waveforms module, which parses user-imported pulse files and seeds the
+// built-in defaults. This module only plays back ready-made WaveFrame[]s.
 
 // ---------------------------------------------------------------------------
 // Public state
@@ -522,83 +494,25 @@ export function setStrengthLimit(limitA: number, limitB: number): void {
 }
 
 /**
- * Play a preset waveform on a channel.
+ * Play a pre-built waveform on a channel.
  * @param channel  'A' or 'B'
- * @param preset  One of: breath, tide, pulse_low, pulse_mid, pulse_high, tap
- * @param frequency  Override frequency in ms (applied to every frame)
- * @param intensity  Override intensity 0-100 (scales frame intensities)
- * @param durationFrames  Number of frames to play (0 or undefined = full preset)
- * @param loop  Whether to loop the waveform
+ * @param frames   One frame per 100ms, each [encoded_freq, intensity(0-100)]
+ * @param loop     Whether to loop playback
  */
 export function sendWave(
   channel: string,
-  preset: string | null,
-  frequency: number | null | undefined,
-  intensity: number | null | undefined,
-  durationFrames: number = 10,
+  frames: WaveFrame[],
   loop: boolean = false,
 ): void {
   if (!writeChar) throw new Error('设备未连接');
   const ch = String(channel || '').toUpperCase() as Channel;
   if (ch !== 'A' && ch !== 'B') throw new Error(`Invalid channel: ${channel}`);
-
-  const freqN = frequency == null ? null : toInt(frequency, 10);
-  const intN = intensity == null ? null : clamp(toInt(intensity, 0), 0, 100);
-  const framesN = Math.max(1, toInt(durationFrames, 10));
-  let frames: WaveFrame[];
-
-  if (preset && PRESETS[preset as WavePreset]) {
-    // Use preset, optionally overriding frequency/intensity
-    frames = PRESETS[preset as WavePreset].map(([f, i]): WaveFrame => {
-      let ef = f;
-      let ei = i;
-      if (freqN !== null) ef = encodeFrequency(freqN);
-      if (intN !== null) ei = Math.round((i * intN) / 100);
-      return [ef, ei];
-    });
-  } else if (freqN !== null) {
-    const ef = encodeFrequency(freqN);
-    const ei = intN !== null ? intN : 50;
-    frames = Array.from({ length: framesN }, (): WaveFrame => [ef, ei]);
-  } else {
-    throw new Error(`Must provide a valid preset or frequency. Got preset="${preset}"`);
+  if (!Array.isArray(frames) || frames.length === 0) {
+    throw new Error('sendWave: frames must be a non-empty array');
   }
 
   const ws = waveState[ch];
-  ws.frames = frames;
-  ws.index = 0;
-  ws.loop = loop;
-  ws.active = true;
-  notify();
-}
-
-/**
- * Design a custom waveform from step descriptors.
- * @param channel  'A' or 'B'
- * @param steps  Array of step descriptors
- * @param loop  Whether to loop
- */
-export function designWave(channel: string, steps: WaveStep[], loop: boolean = false): void {
-  if (!writeChar) throw new Error('设备未连接');
-  const ch = String(channel || '').toUpperCase() as Channel;
-  if (ch !== 'A' && ch !== 'B') throw new Error(`Invalid channel: ${channel}`);
-  if (!Array.isArray(steps)) throw new Error('designWave: steps must be an array');
-  const frames: WaveFrame[] = [];
-  for (const step of steps) {
-    const ef = encodeFrequency(toInt((step as any)?.freq, 10));
-    const ei = clamp(toInt((step as any)?.intensity, 0), 0, 100);
-    const count = Math.max(1, toInt((step as any)?.repeat, 1));
-    for (let r = 0; r < count; r++) {
-      frames.push([ef, ei]);
-    }
-  }
-
-  if (frames.length === 0) {
-    throw new Error('designWave: no frames produced');
-  }
-
-  const ws = waveState[ch];
-  ws.frames = frames;
+  ws.frames = frames.slice();
   ws.index = 0;
   ws.loop = loop;
   ws.active = true;
