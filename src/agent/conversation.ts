@@ -142,11 +142,7 @@ async function drainPendingTimers(): Promise<void> {
       '这是你之前设置的内部提醒。请根据当前设备状态和对话上下文继续后续流程；若需要操作设备，先调用工具，再正常回复用户。',
   };
 
-  await runConversationTurn(
-    tailWithPrevExchange([...store.items, trigger]),
-    undefined,
-    false /* don't store the timer-triggered system message in the conversation history */,
-  );
+  await runConversationTurn(tailWithPrevExchange([...store.items, trigger]));
 }
 
 // ---------------------------------------------------------------------------
@@ -332,12 +328,14 @@ async function runConversationTurn(
   };
 
   try {
+    // Fetch the custom prompt right before the turn
+    customPrompt = customPrompt == null ? cb.onFetchCustomPrompt?.() || '' : customPrompt;
     const finalItems = await runTurn({
       conversationItems,
       buildInstructions: (deviceStatus, isFirstIteration, turnToolCalls) =>
         buildInstructions({
           presetId: store.activePresetId,
-          customPrompt: customPrompt == null ? cb.onFetchCustomPrompt?.() || '' : customPrompt,
+          customPrompt,
           deviceStatus,
           isFirstIteration,
           turnToolCalls,
