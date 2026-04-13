@@ -5,14 +5,7 @@
 
 import type { ConversationRecord } from '../types';
 import { getItemText } from '../types';
-import {
-  bluetooth,
-  conversation,
-  history,
-  PROMPT_PRESETS,
-  executeTool,
-  cancelAllBurstRestores,
-} from '../agent';
+import { bluetooth, conversation, history, PROMPT_PRESETS } from '../agent';
 import { loadSettings } from '../agent/providers';
 import * as chat from './chat';
 import * as theme from './theme';
@@ -256,7 +249,7 @@ function loadConversationUI(conv: ConversationRecord): void {
 }
 
 function startNewConversationUI(): void {
-  conversation.startNewConversation();
+  conversation.createConversation();
 
   const messagesEl = $('messages');
   if (messagesEl) messagesEl.innerHTML = '';
@@ -335,7 +328,7 @@ export function boot(): void {
     onBusyChange: (busy) => chat.setChatBusy(busy),
     onError: (msg) => chat.addAssistantMessage(msg),
     onHistoryChange: () => sidebar.renderList(),
-    onFetchCustomPrompt: () =>
+    onQueryCustomPrompt: () =>
       ($('custom-system-prompt') as HTMLTextAreaElement | null)?.value || '',
     onRequestPermission: (name, args) => askPermission(name, args),
   });
@@ -420,25 +413,12 @@ export function boot(): void {
   }
 
   // Safety: full stop on page unload (close tab / close browser) and on
-  // visibility change. Always cancel pending burst-restores first so a
-  // backgrounded page can't revive the device after the emergency stop.
+  // visibility change.
   function fullStop(): void {
     try {
-      conversation.fullStopConversation();
+      conversation.fullStop();
     } catch (_) {
       /* */
-    }
-    try {
-      cancelAllBurstRestores();
-    } catch (_) {
-      /* */
-    }
-    if (bluetooth.state.connected) {
-      try {
-        bluetooth.emergencyStop();
-      } catch (_) {
-        /* */
-      }
     }
   }
   window.addEventListener('beforeunload', fullStop);
@@ -452,17 +432,8 @@ export function boot(): void {
   });
 
   // Emergency stop button
-  $('btn-emergency-stop')?.addEventListener('click', async () => {
-    try {
-      conversation.fullStopConversation();
-    } catch (_) {
-      /* */
-    }
-    try {
-      await executeTool('stop', {});
-    } catch (_) {
-      /* */
-    }
+  $('btn-emergency-stop')?.addEventListener('click', () => {
+    fullStop();
     chat.addSystemMessage('\u26A1 紧急停止：已停止所有波形、强度归零');
   });
 

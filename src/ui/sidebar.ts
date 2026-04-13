@@ -73,7 +73,7 @@ export function renderList(): void {
       e.stopPropagation();
       history.deleteConversation(conv.id);
       if (current?.id === conv.id) {
-        conversation.startNewConversation();
+        conversation.createConversation();
         const messagesEl = $('messages');
         if (messagesEl) messagesEl.innerHTML = '';
       }

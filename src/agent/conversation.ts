@@ -17,7 +17,7 @@
 import type { AgentSink, ConversationItem, ConversationRecord } from '../types';
 import * as history from './history';
 import { buildInstructions } from './prompts';
-import { getTools, executeTool, cancelAllTimers, initTimer, type ScheduledTimer } from './tools';
+import { createToolsRuntime, type ScheduledTimer, type ToolRuntime } from './tools';
 import * as bt from './bluetooth';
 import { runTurn } from './runner';
 import { resolveProviderConfig } from './transport';
@@ -32,19 +32,57 @@ import {
 } from './permissions';
 
 export function initConversation(callbacks: ConversationCallbacks): void {
-  initConversationCallbacks(callbacks);
-  initConversationTools();
+  initCallbacks(callbacks);
+  initToolsRuntime();
 }
 
 export function resetConversation(): void {
-  abortCurrent();
-  resetConversationTools();
+  fullStop();
   store.items = [];
   store.current = null;
 }
 
-export function fullStopConversation(): void {
-  resetConversationTools();
+export function loadConversation(conv: ConversationRecord): void {
+  resetConversation();
+  store.items = sanitize(conv.items);
+  store.current = conv;
+  store.activePresetId = conv.presetId || 'gentle';
+}
+
+export function createConversation(): void {
+  resetConversation();
+  // A fresh conversation should not inherit broad trust granted earlier:
+  //   - the session-wide 'always' mode is revoked
+  //   - every per-tool grant accumulated via the dialog is wiped
+  // The 5-minute 'timed' settings mode keeps its own expiry and is left
+  // untouched here.
+  clearAlwaysMode();
+  clearGrants();
+}
+
+export function fullStop(): void {
+  abortCurrent();
+  toolsRuntime.fullStop();
+  pendingTimers.length = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Abort handling — allow the UI to cancel an in-flight turn, which may be
+// mid-generation or mid-tool-call.
+// ---------------------------------------------------------------------------
+
+/**
+ *  Abort controller for the currently in-flight sendMessage, if any.
+ */
+let currentAbort: AbortController | null = null;
+
+/**
+ * Cancel the in-flight turn. Safe to call even if nothing is running.
+ * The sendMessage promise will resolve (not reject) — the cancellation
+ * is reported as a short assistant note in the conversation.
+ */
+export function abortCurrent(): void {
+  if (currentAbort) currentAbort.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +101,7 @@ export interface ConversationCallbacks {
   onError: (message: string) => void;
   onBusyChange: (isBusy: boolean) => void;
   onHistoryChange: () => void;
-  onFetchCustomPrompt?: () => string;
+  onQueryCustomPrompt: () => string;
   /**
    * Prompt the user to allow or deny a mutating tool call. The UI should
    * show a modal with the four standard scopes (once / timed / always /
@@ -78,7 +116,7 @@ export interface ConversationCallbacks {
 
 let callbacks: ConversationCallbacks | null = null;
 
-function initConversationCallbacks(cb: ConversationCallbacks): void {
+function initCallbacks(cb: ConversationCallbacks): void {
   callbacks = cb;
 }
 
@@ -95,44 +133,31 @@ const store = {
   activePresetId: 'gentle',
 };
 
-/** Abort controller for the currently in-flight sendMessage, if any. */
-let currentAbort: AbortController | null = null;
-
-/**
- * Cancel the in-flight turn. Safe to call even if nothing is running.
- * The sendMessage promise will resolve (not reject) — the cancellation
- * is reported as a short assistant note in the conversation.
- */
-export function abortCurrent(): void {
-  if (currentAbort) currentAbort.abort();
-}
-
 // -----------------------------------------------------------
 // Conversation tools — timers for now, but could be more in the future
 // -----------------------------------------------------------
+let toolsRuntime: ToolRuntime = createToolsRuntime();
 
-export function initConversationTools(): void {
-  initTimer((timer) => {
-    if (!store.current || !callbacks) return;
-    callbacks.onSystemMessage(`⏰ 定时器「${timer.label}」已到期。`);
-    pendingTimers.push(timer);
-    void drainPendingTimers();
+function initToolsRuntime(): void {
+  toolsRuntime = createToolsRuntime({
+    // When a timer is due, we inject a synthetic user message into the conversation to notify the LLM of the event. This allows the LLM to react to timers in-context and decide what to do next (e.g. call a tool, send a message, or ignore).
+    onTimerDue: (timer) => {
+      if (!store.current || !callbacks) return;
+      callbacks.onSystemMessage(`⏰ 定时器「${timer.label}」已到期。`);
+      pendingTimers.push(timer);
+      void drainPendingTimers();
+    },
   });
-}
-
-export function resetConversationTools(): void {
-  cancelAllTimers();
-  pendingTimers.length = 0;
 }
 
 const pendingTimers: ScheduledTimer[] = [];
 
 async function drainPendingTimers(): Promise<void> {
   if (store.isProcessing || !store.current || !callbacks) return;
-
+  // We drain timers one at a time, giving the LLM a chance to respond to each
   const timer = pendingTimers.shift();
   if (!timer) return;
-
+  // Inject a synthetic user message to inform the LLM of the timer event and
   const trigger: ConversationItem = {
     role: 'user',
     content:
@@ -141,7 +166,7 @@ async function drainPendingTimers(): Promise<void> {
       `seconds: ${timer.seconds}\n` +
       '这是你之前设置的内部提醒。请根据当前设备状态和对话上下文继续后续流程；若需要操作设备，先调用工具，再正常回复用户。',
   };
-
+  // We don't want these system-triggered messages to persist in the conversation
   await runConversationTurn(
     tailWithPrevExchange([...store.items, trigger]),
     undefined,
@@ -220,24 +245,6 @@ export function setActivePresetId(id: string): void {
   store.activePresetId = id;
 }
 
-export function loadConversation(conv: ConversationRecord): void {
-  resetConversation();
-  store.items = sanitize(conv.items);
-  store.current = conv;
-  store.activePresetId = conv.presetId || 'gentle';
-}
-
-export function startNewConversation(): void {
-  resetConversation();
-  // A fresh conversation should not inherit broad trust granted earlier:
-  //   - the session-wide 'always' mode is revoked
-  //   - every per-tool grant accumulated via the dialog is wiped
-  // The 5-minute 'timed' settings mode keeps its own expiry and is left
-  // untouched here.
-  clearAlwaysMode();
-  clearGrants();
-}
-
 // ---------------------------------------------------------------------------
 // ChatSink — per-sendMessage UI adapter
 // ---------------------------------------------------------------------------
@@ -304,6 +311,8 @@ async function runConversationTurn(
   const cb = callbacks;
   const sink = new ChatSink(cb);
   const abort = new AbortController();
+
+  customPrompt ??= cb.onQueryCustomPrompt();
   currentAbort = abort;
 
   cb.onBusyChange(true);
@@ -337,14 +346,14 @@ async function runConversationTurn(
       buildInstructions: (deviceStatus, isFirstIteration, turnToolCalls) =>
         buildInstructions({
           presetId: store.activePresetId,
-          customPrompt: customPrompt == null ? cb.onFetchCustomPrompt?.() || '' : customPrompt,
+          customPrompt,
           deviceStatus,
           isFirstIteration,
           turnToolCalls,
         }),
       getDeviceStatus: bt.getStatus,
-      tools: getTools(),
-      executor: executeTool,
+      tools: toolsRuntime.getTools(),
+      executor: toolsRuntime.executeTool,
       transportConfig: resolveProviderConfig(),
       sink,
       signal: abort.signal,
@@ -356,7 +365,6 @@ async function runConversationTurn(
   } catch (err: any) {
     // Drop any in-flight streamed bubble regardless of the failure mode.
     sink.discardPendingBubble();
-
     if (isAbortError(err) || abort.signal.aborted) {
       // User pressed stop. Render a short note, persist it so reloads show
       // a complete pair, but do NOT emit cb.onError (not a real error).
@@ -416,8 +424,5 @@ export async function sendMessage(text: string): Promise<void> {
   // Keep only the previous exchange (prior user + its reply) plus the
   // current user message. store.items still holds the full history for
   // UI / localStorage; we only trim what goes up to the LLM.
-  await runConversationTurn(
-    tailWithPrevExchange(store.items),
-    callbacks.onFetchCustomPrompt?.() || '',
-  );
+  await runConversationTurn(tailWithPrevExchange(store.items), callbacks.onQueryCustomPrompt());
 }

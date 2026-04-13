@@ -72,12 +72,10 @@ function cancelBurstRestore(channel: 'A' | 'B' | 'all'): void {
 }
 
 /**
- * Cancel every pending burst-restore timer. Exposed for the emergency-stop
- * paths that bypass the tool layer (visibilitychange, beforeunload) so a
- * pending restore cannot revive the device after the user or lifecycle
- * handler has already zeroed it.
+ * Cancel every pending burst-restore timer so a pending restore cannot
+ * revive the device after the runtime has already zeroed it.
  */
-export function cancelAllBurstRestores(): void {
+function cancelAllBurstRestores(): void {
   cancelBurstRestore('all');
 }
 
@@ -378,50 +376,10 @@ const HANDLERS: Record<string, Handler> = {
       _note: `${clampedDuration}ms 后强度必定回落到不高于 ${prev} 的水平——这是安全硬保证，不会因为其它工具调用而取消。`,
     };
   },
-
-  timer({ seconds, label }) {
-    const requestedSeconds = num(seconds, 1);
-    const actualSeconds = Math.min(Math.max(1, requestedSeconds), 3600);
-    const safeLabel = String(label ?? '').trim() || 'timer';
-    const scheduledAt = Date.now();
-    const dueAt = scheduledAt + actualSeconds * 1000;
-    const timerInfo: ScheduledTimer = {
-      id: nextTimerId(),
-      label: safeLabel,
-      seconds: actualSeconds,
-      scheduledAt,
-      dueAt,
-    };
-
-    const timer = setTimeout(() => {
-      scheduledTimers.delete(timerInfo.id);
-      if (!timerListener) return;
-      try {
-        timerListener(timerInfo);
-      } catch (err) {
-        console.error('[tools] timer listener:', err);
-      }
-    }, actualSeconds * 1000);
-
-    scheduledTimers.set(timerInfo.id, timer);
-
-    return {
-      timer: {
-        id: timerInfo.id,
-        label: timerInfo.label,
-        seconds: {
-          requested: requestedSeconds,
-          actual: timerInfo.seconds,
-          limited: requestedSeconds !== timerInfo.seconds,
-        },
-        dueAt: timerInfo.dueAt,
-      },
-    };
-  },
 };
 
 // ---------------------------------------------------------------------------
-// Conversation timer tracking
+// Timer runtime
 // ---------------------------------------------------------------------------
 
 export interface ScheduledTimer {
@@ -432,32 +390,22 @@ export interface ScheduledTimer {
   dueAt: number;
 }
 
-const scheduledTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export interface ToolRuntime {
+  getTools(): ToolDef[];
+  executeTool(name: string, args: Record<string, any>): Promise<string>;
+  fullStop(): void;
+}
 
 function nextTimerId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-let timerListener: ((timer: ScheduledTimer) => void) | null = null;
-export function initTimer(listener: ((timer: ScheduledTimer) => void) | null): void {
-  timerListener = listener;
-}
-
-export function cancelAllTimers(): void {
-  for (const [, timer] of scheduledTimers) clearTimeout(timer);
-  scheduledTimers.clear();
-}
-
-// ---------------------------------------------------------------------------
-// Exports
-// ---------------------------------------------------------------------------
-
-export function getTools(): ToolDef[] {
-  return buildToolDefs();
-}
-
-export async function executeTool(name: string, args: Record<string, any>): Promise<string> {
-  const handler = HANDLERS[name];
+async function runHandler(
+  handlers: Record<string, Handler>,
+  name: string,
+  args: Record<string, any>,
+): Promise<string> {
+  const handler = handlers[name];
   if (!handler) return JSON.stringify({ error: `Unknown tool: ${name}` });
 
   if (!bt.getStatus().connected) {
@@ -479,4 +427,75 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     console.error(`[tools] ${name}:`, err);
     return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+export function createToolsRuntime(opts?: {
+  onTimerDue?: (timer: ScheduledTimer) => void;
+}): ToolRuntime {
+  const scheduledTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const onTimerDue = opts?.onTimerDue;
+  const handlers: Record<string, Handler> = { ...HANDLERS };
+
+  /**
+   * Cancel any pending timers that haven't yet triggered.
+   */
+  function cancelAllScheduledTimers(): void {
+    for (const [, timer] of scheduledTimers) clearTimeout(timer);
+    scheduledTimers.clear();
+  }
+
+  if (onTimerDue) {
+    handlers.timer = ({ seconds, label }) => {
+      const requestedSeconds = num(seconds, 1);
+      const actualSeconds = Math.min(Math.max(1, requestedSeconds), 3600);
+      const safeLabel = String(label ?? '').trim() || 'timer';
+      const scheduledAt = Date.now();
+      const dueAt = scheduledAt + actualSeconds * 1000;
+      const timerInfo: ScheduledTimer = {
+        id: nextTimerId(),
+        label: safeLabel,
+        seconds: actualSeconds,
+        scheduledAt,
+        dueAt,
+      };
+
+      const timer = setTimeout(() => {
+        scheduledTimers.delete(timerInfo.id);
+        try {
+          onTimerDue(timerInfo);
+        } catch (err) {
+          console.error('[tools] timer listener:', err);
+        }
+      }, actualSeconds * 1000);
+
+      scheduledTimers.set(timerInfo.id, timer);
+
+      return {
+        timer: {
+          id: timerInfo.id,
+          label: timerInfo.label,
+          seconds: {
+            requested: requestedSeconds,
+            actual: timerInfo.seconds,
+            limited: requestedSeconds !== timerInfo.seconds,
+          },
+          dueAt: timerInfo.dueAt,
+        },
+      };
+    };
+  }
+
+  const enabledToolNames = new Set(Object.keys(handlers));
+
+  return {
+    getTools: () => buildToolDefs().filter((tool) => enabledToolNames.has(tool.name)),
+    executeTool: (name, args) => runHandler(handlers, name, args),
+    fullStop(): void {
+      cancelAllScheduledTimers();
+      cancelAllBurstRestores();
+      if (bt.state.connected) {
+        bt.emergencyStop();
+      }
+    },
+  };
 }
