@@ -394,10 +394,9 @@ async function runConversationTurn(
       queueMicrotask(() => {
         void drainPendingTimers();
       });
-      return;
+    } else {
+      cb.onBusyChange(false);
     }
-
-    cb.onBusyChange(false);
   }
 }
 

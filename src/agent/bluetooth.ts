@@ -283,9 +283,8 @@ function buildB0(): Uint8Array {
   buf[0] = 0xb0;
 
   // Determine strength mode nibble
-  let modeNibble = 0;
-  let strA = 0;
-  let strB = 0;
+  let modeNibble;
+  let strA, strB;
 
   if (!awaitingAck && pendingMode !== 0) {
     // We have a pending strength change – stamp it with the next seq.
