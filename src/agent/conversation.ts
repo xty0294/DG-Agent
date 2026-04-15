@@ -252,13 +252,52 @@ export function setActivePresetId(id: string): void {
 // ChatSink — per-sendMessage UI adapter
 // ---------------------------------------------------------------------------
 
+/** Sentence-ending punctuation (CN + EN) used to chunk TTS input.
+ *  Comma intentionally excluded — splitting on every comma fragments
+ *  Chinese prosody too aggressively. */
+const TTS_BOUNDARY = /[。！？；.!?;\n]/g;
+
 class ChatSink implements AgentSink {
   private cb: ConversationCallbacks;
   private msgId: string | null = null;
   private lastText = '';
+  /** Length of lastText already forwarded to the TTS stream. */
+  private ttsSent = 0;
+  /** Whether the current turn has an open TTS stream. */
+  private ttsOpen = false;
 
   constructor(cb: ConversationCallbacks) {
     this.cb = cb;
+  }
+
+  private flushTtsAt(accumulated: string, final: boolean): void {
+    if (isBridgeTurn() || !tts.isEnabled()) return;
+
+    const pending = accumulated.slice(this.ttsSent);
+    if (!pending) return;
+
+    let cutoff: number;
+    if (final) {
+      cutoff = pending.length;
+    } else {
+      // Find the last sentence boundary in the unsent portion.
+      TTS_BOUNDARY.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      let last = -1;
+      while ((m = TTS_BOUNDARY.exec(pending)) !== null) last = m.index + 1;
+      cutoff = last;
+    }
+    if (cutoff <= 0) return;
+
+    const chunk = pending.slice(0, cutoff).trim();
+    this.ttsSent += cutoff;
+    if (!chunk) return;
+
+    if (!this.ttsOpen) {
+      tts.startSpeaking();
+      this.ttsOpen = true;
+    }
+    tts.appendText(chunk);
   }
 
   /** Drop any in-flight bubble without finalizing (used on error). */
@@ -275,6 +314,7 @@ class ChatSink implements AgentSink {
     this.lastText = accumulated;
     this.cb.onTypingEnd();
     this.msgId = this.cb.onAssistantStream(accumulated, this.msgId || undefined);
+    this.flushTtsAt(accumulated, false);
     if (isBridgeTurn()) bridgeSink.onTextDelta(accumulated);
   }
 
@@ -283,18 +323,30 @@ class ChatSink implements AgentSink {
       this.cb.onAssistantFinalize(this.msgId);
       this.msgId = null;
     }
-    // Trigger TTS for the completed message (fire and forget)
-    if (this.lastText && tts.isEnabled() && !isBridgeTurn()) {
-      tts.speak(this.lastText).catch((err) => {
-        console.error('[TTS] playback error:', err);
+    // Flush any remaining text and close the TTS stream.
+    if (this.lastText) this.flushTtsAt(this.lastText, true);
+    if (this.ttsOpen) {
+      tts.finishSpeaking().catch((err) => {
+        // 'TTS aborted' is the expected reject when the user interrupts —
+        // not a real error.
+        if (!/aborted/i.test(err?.message || '')) console.error('[TTS] playback error:', err);
       });
+      this.ttsOpen = false;
     }
+    this.ttsSent = 0;
     this.lastText = '';
     if (isBridgeTurn()) bridgeSink.onTextComplete();
   }
 
   onTextDiscard(): void {
     this.discardPendingBubble();
+    // Discard any TTS stream we opened for this aborted bubble.
+    if (this.ttsOpen) {
+      tts.stop();
+      this.ttsOpen = false;
+    }
+    this.ttsSent = 0;
+    this.lastText = '';
     this.cb.onTypingStart();
     if (isBridgeTurn()) bridgeSink.onTextDiscard();
   }

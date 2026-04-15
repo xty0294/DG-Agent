@@ -954,14 +954,14 @@ export interface VoiceSettings {
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  speaker: 'longyingtian',
+  speaker: 'longxiaochun_v2',
   dashscopeApiKey: '',
   proxyUrl: '',
   autoStopEnabled: true,
 };
 
 const VOICE_SPEAKERS: Array<{ id: string; label: string }> = [
-  { id: 'longyingtian', label: 'longyingtian' },
+  { id: 'longxiaochun_v2', label: 'longxiaochun_v2' },
 ];
 
 export function loadVoiceSettings(): VoiceSettings {

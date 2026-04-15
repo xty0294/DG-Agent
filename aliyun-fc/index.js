@@ -18,8 +18,8 @@ const WS = require('ws');
 
 const BAILIAN_API = 'https://dashscope.aliyuncs.com/compatible-mode/v1/responses';
 const BAILIAN_ASR_API = 'https://dashscope.aliyuncs.com/compatible-mode/v1/audio/transcriptions';
-const DASHSCOPE_ASR_WS = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference/';
-const DASHSCOPE_TTS_WS = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference/';
+const DASHSCOPE_ASR_WS = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
+const DASHSCOPE_TTS_WS = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
 const MAX_REQUESTS_PER_MINUTE = 10;
 const MAX_ASR_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_ORIGINS = ['https://0xnullai.github.io'];

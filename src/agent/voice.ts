@@ -72,7 +72,8 @@ function setStatus(s: VoiceStatus): void {
 }
 
 function generateTaskId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  // DashScope spec requires UUID for task_id.
+  return crypto.randomUUID();
 }
 
 // ---------------------------------------------------------------------------
