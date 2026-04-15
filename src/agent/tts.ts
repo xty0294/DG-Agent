@@ -116,7 +116,7 @@ export async function speak(text: string): Promise<void> {
             task_group: 'audio',
             task: 'tts',
             function: 'SpeechSynthesizer',
-            model: 'cosyvoice-v3',
+            model: 'cosyvoice-v3-flash',
             parameters: {
               voice: vs.speaker || 'longyan_v3',
               format: 'pcm',

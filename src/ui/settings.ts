@@ -962,7 +962,6 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 
 const VOICE_SPEAKERS: Array<{ id: string; label: string }> = [
   { id: 'longyan_v3', label: 'longyan_v3' },
-  { id: 'Chelsie', label: 'Chelsie' },
 ];
 
 export function loadVoiceSettings(): VoiceSettings {
