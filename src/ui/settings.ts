@@ -954,20 +954,15 @@ export interface VoiceSettings {
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  speaker: 'longxiaochun',
+  speaker: 'longyan_v3',
   dashscopeApiKey: '',
   proxyUrl: '',
   autoStopEnabled: true,
 };
 
 const VOICE_SPEAKERS: Array<{ id: string; label: string }> = [
-  { id: 'longxiaochun', label: '甜美女声' },
-  { id: 'longxiaoxia', label: '温柔女声' },
-  { id: 'longyueer', label: '清新女声' },
-  { id: 'longjing', label: '端庄女声' },
-  { id: 'longshu', label: '知性男声' },
-  { id: 'longxiaobai', label: '阳光男声' },
-  { id: 'longcheng', label: '沉稳男声' },
+  { id: 'longyan_v3', label: 'longyan_v3' },
+  { id: 'Chelsie', label: 'Chelsie' },
 ];
 
 export function loadVoiceSettings(): VoiceSettings {

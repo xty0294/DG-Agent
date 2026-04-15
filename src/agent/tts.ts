@@ -5,8 +5,8 @@
  * chunks, and plays them via Web Audio API with gapless streaming.
  */
 
-import { loadVoiceSettings } from '../ui/settings';
 import { _resolveWsUrl } from './voice';
+import { loadVoiceSettings } from '../ui/settings';
 
 // ---------------------------------------------------------------------------
 // Status types
@@ -89,9 +89,12 @@ export async function speak(text: string): Promise<void> {
     ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
 
-    ws.onopen = () => {
+    const thisWs = ws;
+    thisWs.onopen = () => {
+      // Guard against races: stop() may have replaced/cleared ws before onopen fires.
+      if (ws !== thisWs || thisWs.readyState !== WebSocket.OPEN) return;
       setStatus('synthesizing');
-      ws!.send(
+      thisWs.send(
         JSON.stringify({
           header: {
             action: 'run-task',
@@ -102,9 +105,9 @@ export async function speak(text: string): Promise<void> {
             task_group: 'audio',
             task: 'tts',
             function: 'SpeechSynthesizer',
-            model: 'cosyvoice-v2',
+            model: 'cosyvoice-v3',
             parameters: {
-              voice: vs.speaker || 'longxiaochun',
+              voice: vs.speaker || 'longyan_v3',
               format: 'pcm',
               sample_rate: TTS_SAMPLE_RATE,
             },
